@@ -57,7 +57,7 @@ const PROJECT_FILES = [
   {
     label: "Tutorial Notebook",
     desc: "Jupyter notebook: reading catalogs, plotting photometry, SED reconstruction, P(z)",
-    href: `/spam/unicorn_example.ipynb`,
+    href: `/spam/spam_example.ipynb`,
     size: "~36 KB",
   },
   {
