@@ -47,7 +47,7 @@ export default function DataLayout({ children }: { children: React.ReactNode }) 
             })}
           </div>
         </div>
-        <Link href="/" className="navlink">← Home</Link>
+        <a href="https://kelceydavis33.github.io/SPAM/" className="navlink">SPAM site ↗</a>
       </nav>
 
       <div style={{ flex: 1 }}>{children}</div>
