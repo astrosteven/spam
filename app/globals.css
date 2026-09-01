@@ -1,0 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Public+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* SPAM palette — light "paper" theme (matches kelceydavis33.github.io/SPAM).
+     Same semantic variable NAMES as the UNICORN site so component styles flip
+     automatically; only the values change (dark -> light). */
+  --paper:        #EFF0F2;
+  --navy:         #16225c;   /* SPAM can navy */
+  --gold:         #f2c018;   /* SPAM can gold */
+  --spam-blue:    #2f97e0;   /* SPAM lettering blue */
+
+  --bg:           #EFF0F2;   /* paper */
+  --bg-card:      #FFFFFF;   /* white cards */
+  --bg-card2:     #F7F8FA;   /* faint off-white */
+  --border:       #D6D8DC;   /* rule */
+  --border-bright:#C0C4CB;
+
+  /* wavelength accent scale from the SPAM site */
+  --wl-1: #6B4FD6; --wl-2: #2F7DD1; --wl-3: #1F9E9E; --wl-4: #D89A1E; --wl-5: #C4452F;
+
+  /* Semantic roles */
+  --accent:       #2F7DD1;   /* primary = SPAM blue */
+  --accent-bright:#1f66b5;
+  --accent-dim:   rgba(47,125,209,0.10);
+  --accent2:      #D89A1E;   /* secondary = gold */
+  --accent3:      #6B4FD6;   /* purple */
+  --highlight:    #1F9E9E;   /* teal */
+  --glow:         rgba(47,125,209,0.20);
+
+  --text:         #14161A;   /* ink */
+  --text-muted:   #5B6069;   /* ink-2 */
+  --text-dim:     #8B9099;   /* ink-3 */
+
+  --green:        #1F9E9E;   /* teal for "good" */
+  --amber:        #D89A1E;
+  --red:          #C4452F;
+
+  /* Legacy UNICORN palette aliases -> SPAM light accents, so pages not yet
+     individually restyled still render with sensible colors. */
+  --purple-deep: #6B4FD6; --purple-mid: #2F7DD1; --purple: #6B4FD6;
+  --lavender: #2F7DD1; --pink-purple: #6B4FD6; --pink: #D89A1E;
+  --pink-light: #D89A1E; --pink-pale: #f2e3c0;
+
+  /* Type + shape system */
+  --serif: 'Bricolage Grotesque', 'Public Sans', system-ui, sans-serif;  /* display */
+  --sans:  'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(20,22,26,0.04), 0 8px 24px -12px rgba(20,22,26,0.14);
+  --shadow-glow: 0 2px 4px rgba(20,22,26,0.05), 0 12px 30px -14px rgba(47,125,209,0.28);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.mono { font-family: 'JetBrains Mono', monospace; }
+/* Display font (Bricolage Grotesque) for large headings */
+.display { font-family: var(--serif); font-weight: 700; letter-spacing: -0.02em; line-height: 1.04; }
+
+/* Blue→gold gradient text utility */
+.gradient-text {
+  background: linear-gradient(120deg, var(--spam-blue) 0%, var(--wl-2) 40%, var(--gold) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+
+.eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 0.85rem; letter-spacing: 0.02em;
+  padding: 0.8rem 1.6rem; border-radius: 999px;
+  text-decoration: none; cursor: pointer; border: 1.5px solid transparent;
+  transition: transform .15s ease, box-shadow .2s ease, background .2s ease, border-color .2s ease;
+  white-space: nowrap;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 20px -8px rgba(47,125,209,0.5);
+}
+.btn-primary:hover { background: var(--accent-bright); box-shadow: 0 12px 26px -8px rgba(47,125,209,0.6); }
+.btn-ghost { background: #fff; color: var(--text-muted); border-color: var(--border); }
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Display page title (interior pages) */
+.page-title { font-family: var(--serif); font-weight: 700; letter-spacing: -0.02em; line-height: 1.08; color: var(--text); }
+
+/* ---------- data-area nav ---------- */
+.navlink {
+  padding: 7px 16px; border-radius: 999px; font-size: 0.83rem; letter-spacing: 0.02em;
+  text-decoration: none; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;
+  border: 1px solid transparent;
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+.navlink:hover { color: var(--text); background: rgba(20,22,26,0.04); }
+.navlink.active { color: var(--accent); background: var(--accent-dim); border-color: rgba(47,125,209,0.30); }
+.signout {
+  background: #fff; border: 1px solid var(--border); border-radius: 999px;
+  padding: 7px 16px; color: var(--text-muted); font-size: 0.78rem;
+  font-family: 'JetBrains Mono', monospace; cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+.signout:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Subtle light background wash (very faint accent tints, no starfield) */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 88% 4%, rgba(47,125,209,0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 55% 45% at 6% 96%, rgba(216,154,30,0.06) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.page-wrapper { position: relative; z-index: 1; }
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .2s ease;
+}
+.card:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.card-bright {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: var(--paper); }
+::-webkit-scrollbar-thumb { background: #cfd2d8; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
