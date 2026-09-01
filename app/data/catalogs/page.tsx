@@ -269,7 +269,7 @@ export default function CatalogsPage() {
       {/* Header */}
       <div style={{ marginBottom: "2rem" }}>
         <h1 className="page-title" style={{ fontSize: "2rem", color: "var(--text)", marginBottom: "6px" }}>
-          Catalogs
+          Download
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: "0.95rem", maxWidth: "640px" }}>
           All SPAM data products are FITS binary tables with embedded column descriptions

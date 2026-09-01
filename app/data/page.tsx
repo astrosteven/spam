@@ -20,8 +20,8 @@ const FIELD_META = [
 ];
 
 const CARDS = [
-  { href: "/data/catalogs", color: "var(--wl-2)", title: "Catalogs", body: "Download the photometry, photo-z variants, flags, PSFs, segmentation map, and templates." },
-  { href: "/data/search",   color: "var(--wl-3)", title: "Search",   body: "Find sources by ID or position, run queries on redshift & magnitude, view bio plots, export subsets." },
+  { href: "/data/catalogs", color: "var(--wl-2)", title: "Download", body: "Download the photometry, photo-z variants, flags, PSFs, segmentation map, and templates." },
+  { href: "/data/search",   color: "var(--wl-3)", title: "Query",    body: "Find sources by ID or position, run queries on redshift & magnitude, view bio plots, export subsets." },
 ];
 
 export default function DataOverview() {

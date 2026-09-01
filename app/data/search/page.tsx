@@ -108,8 +108,9 @@ function corralBase(): string {
 const SEARCH_FIELDS: { field: string; dir: string; prefix: string; available: boolean }[] = [
   { field: "SPAM", dir: "", prefix: "ceers", available: true },   // data flat under Corral .../unicorn/spam/
 ];
-// Build a Corral web path, handling an empty field dir (flat layout).
-const webPath = (baseRoot: string, dir: string) => (dir ? `${baseRoot}/${dir}/web` : `${baseRoot}/web`);
+// The field's root on Corral (handles an empty dir = flat layout). Under it live
+// cards/ (per-object JSON) and stamps/ (montage PNGs) as separate sibling folders.
+const fieldRoot = (baseRoot: string, dir: string) => (dir ? `${baseRoot}/${dir}` : baseRoot);
 
 type NumCol = (number | null)[] | null;
 type FieldIndex = {
@@ -158,7 +159,7 @@ async function loadField(fc: typeof SEARCH_FIELDS[0]): Promise<{ idx: FieldIndex
     const override = dataOverride();
     const idxName = `${fc.prefix}_search_v${VERSION}.json`;
     const zgName = `${fc.prefix}_zgrid_v${VERSION}.json`;
-    const primary = override ? webPath(override, fc.dir) : INDEX_BASE;
+    const primary = override ? fieldRoot(override, fc.dir) : INDEX_BASE;
     const load = async (base: string) => Promise.all([
       fetchJsonMaybeGz(`${base}/${idxName}`),
       fetchJsonMaybeGz(`${base}/${zgName}`),
@@ -168,7 +169,7 @@ async function loadField(fc: typeof SEARCH_FIELDS[0]): Promise<{ idx: FieldIndex
       [idx, zg] = await load(primary);
     } catch (e) {
       if (override) throw e;  // explicit override: don't silently fall back
-      [idx, zg] = await load(webPath(CORRAL_DEFAULT, fc.dir));
+      [idx, zg] = await load(fieldRoot(CORRAL_DEFAULT, fc.dir));
     }
     _indexCache[fc.field] = idx;
     _zgridCache[fc.field] = zg;
@@ -184,7 +185,7 @@ async function loadField(fc: typeof SEARCH_FIELDS[0]): Promise<{ idx: FieldIndex
 
 async function fetchObject(fc: typeof SEARCH_FIELDS[0], id: number, zg: ZGrid): Promise<SourceResult | null> {
   try {
-    const r = await fetch(`${webPath(corralBase(), fc.dir)}/objects/${fc.prefix}_${id}.json`);
+    const r = await fetch(`${fieldRoot(corralBase(), fc.dir)}/cards/${fc.prefix}_${id}.json`);
     if (!r.ok) return null;
     const o = await r.json();
     let selFail: SourceResult["selFail"] | undefined;
@@ -197,7 +198,7 @@ async function fetchObject(fc: typeof SEARCH_FIELDS[0], id: number, zg: ZGrid): 
       selected: o.selected, inspected: o.inspected, sample: o.sample,
       interestLabel: o.interestLabel, zspec: o.zspec,
       zaCirc: o.zaCirc, dchi2: o.dchi2, aperflags: o.aperflags, neighbor: o.neighbor,
-      stampUrl: `${webPath(corralBase(), fc.dir)}/stamps/${fc.prefix}_${id}.png`,
+      stampUrl: `${fieldRoot(corralBase(), fc.dir)}/stamps/${fc.prefix}_${id}.png`,
       selFail,
     };
   } catch {
@@ -839,7 +840,7 @@ export default function SearchPage() {
       {/* Header */}
       <div style={{ marginBottom: "2.5rem" }}>
         <h1 className="page-title" style={{ fontSize: "2rem", color: "var(--text)", marginBottom: "6px" }}>
-          Search
+          Query
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: "0.95rem" }}>
           Search the SPAM catalog by ID, position, uploaded source list, or a

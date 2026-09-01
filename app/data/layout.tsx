@@ -5,8 +5,8 @@ import Image from "next/image";
 
 const NAV_LINKS = [
   { href: "/data",          label: "Overview" },
-  { href: "/data/catalogs", label: "Catalogs" },
-  { href: "/data/search",   label: "Search" },
+  { href: "/data/catalogs", label: "Download" },
+  { href: "/data/search",   label: "Query" },
 ];
 
 export default function DataLayout({ children }: { children: React.ReactNode }) {
