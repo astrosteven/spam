@@ -439,10 +439,11 @@ function PZPlot({ zgrid, pz, za, zgridLowz, pzLowz }: {
   if (!pz.length) return null;
 
   const lowzOk = !!(zgridLowz && pzLowz && pzLowz.length === zgridLowz.length && pzLowz.length);
-  const pzMax = Math.max(Math.max(...pz), lowzOk ? Math.max(...pzLowz!) : 0) || 1;
+  // y-axis top = 1.1x the FIDUCIAL peak (a taller low-z solution may clip at the top).
+  const pzMax = 1.1 * (Math.max(...pz) || 1);
   const zmax = 16;
   const cx = (z: number) => pad.l + (Math.min(z,zmax)/zmax)*pw;
-  const cy = (p: number) => pad.t + ph - (p/pzMax)*ph;
+  const cy = (p: number) => Math.max(pad.t, Math.min(pad.t + ph, pad.t + ph - (p/pzMax)*ph));
 
   const pts = zgrid.map((z,i) => `${cx(z)},${cy(pz[i])}`).join(" ");
   const fill = pts + ` ${cx(zgrid[zgrid.length-1])},${cy(0)} ${cx(zgrid[0])},${cy(0)}`;
@@ -648,7 +649,6 @@ export default function SearchPage() {
   const [queryTotal, setQueryTotal] = useState(0);
   const [queryCard, setQueryCard] = useState<SourceResult | null>(null);
   const [queryCardId, setQueryCardId] = useState<number | null>(null);
-  const [searchField, setSearchField] = useState<string>("all");
   const [status, setStatus] = useState<ResultState>("idle");
   const [results, setResults] = useState<SourceResult[]>([]);
   const [matchSummary, setMatchSummary] = useState("");
@@ -684,8 +684,7 @@ export default function SearchPage() {
     setStatus("searching");
     setResults([]);
     setMatchSummary("");
-    const avail = SEARCH_FIELDS.filter(f => f.available);
-    const fields = searchField === "all" ? avail : avail.filter(f => f.field === searchField);
+    const fields = SEARCH_FIELDS.filter(f => f.available);
     if (fields.length === 0) {
       setStatus("notfound");
       setMatchSummary("No fields are connected yet.");
@@ -878,7 +877,6 @@ export default function SearchPage() {
         {/* ID input */}
         {mode === "id" && (
           <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
-            <FieldSelect value={searchField} onChange={setSearchField} includeAll={true} />
             <div style={{ flex: 1, minWidth: "200px" }}>
               <label style={{ display: "block", fontSize: "0.72rem", color: "var(--text-dim)", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.1em", marginBottom: "6px" }}>
                 OBJECT ID
@@ -903,7 +901,6 @@ export default function SearchPage() {
         {/* RA/Dec input */}
         {mode === "radec" && (
           <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
-            <FieldSelect value={searchField} onChange={setSearchField} includeAll={true} />
             {[
               { label: "RA (deg)", val: raInput,     set: setRaInput,     ph: "e.g. 214.943" },
               { label: "Dec (deg)", val: decInput,   set: setDecInput,    ph: "e.g. 52.942" },
@@ -1323,25 +1320,6 @@ function DownloadControls({ resolveRows, count, note }: {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function FieldSelect({ value, onChange, includeAll }: { value: string; onChange: (v: string) => void; includeAll: boolean }) {
-  const avail = SEARCH_FIELDS.filter(f => f.available);
-  return (
-    <div style={{ minWidth: "150px" }}>
-      <label style={{ display: "block", fontSize: "0.72rem", color: "var(--text-dim)", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.1em", marginBottom: "6px" }}>
-        FIELD
-      </label>
-      <select value={value} onChange={e => onChange(e.target.value)} style={{
-        width: "100%", background: "#fff", border: "1px solid var(--border-bright)",
-        borderRadius: "4px", padding: "9px 12px", color: "var(--text)",
-        fontSize: "0.9rem", fontFamily: "'JetBrains Mono', monospace", outline: "none", cursor: "pointer",
-      }}>
-        {includeAll && <option value="all">All fields</option>}
-        {avail.map(f => <option key={f.field} value={f.field}>{f.field}</option>)}
-      </select>
     </div>
   );
 }
