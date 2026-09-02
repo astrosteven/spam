@@ -9,7 +9,14 @@ const FILTER_GROUPS = [
   { instr: "WFC3",   filters: ["F105W","F125W","F140W","F160W"] },
 ];
 const N_FILTERS = FILTER_GROUPS.reduce((n, g) => n + g.filters.length, 0);
-const PROGRAMS = ["CEERS", "SPAM", "MINERVA", "CAPERS"];
+// JWST program IDs -> STScI program-info lookup pages.
+const PROGRAMS = [
+  { name: "CEERS",   id: 1345 },
+  { name: "SPAM",    id: 8559 },
+  { name: "MINERVA", id: 7814 },
+  { name: "CAPERS",  id: 6368 },
+];
+const jwstProgramUrl = (id: number) => `https://www.stsci.edu/jwst-program-info/program/?program=${id}`;
 
 const FIELD_META = [
   { label: "Field", value: "CEERS / EGS" },
@@ -97,7 +104,11 @@ export default function DataOverview() {
         <div style={{ marginTop: "1.5rem", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <span className="mono" style={{ fontSize: "0.68rem", color: "var(--text-dim)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Programs included</span>
           {PROGRAMS.map(p => (
-            <span key={p} className="mono" style={{ fontSize: "0.75rem", padding: "3px 11px", borderRadius: "999px", background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(47,125,209,0.25)" }}>{p}</span>
+            <a key={p.name} href={jwstProgramUrl(p.id)} target="_blank" rel="noopener noreferrer"
+               title={`JWST program ${p.id}`}
+               className="mono" style={{ fontSize: "0.75rem", padding: "3px 11px", borderRadius: "999px", background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(47,125,209,0.25)", textDecoration: "none" }}>
+              {p.name} <span style={{ opacity: 0.6 }}>#{p.id} ↗</span>
+            </a>
           ))}
         </div>
       </div>
