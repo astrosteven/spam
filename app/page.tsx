@@ -48,8 +48,8 @@ export default function DataOverview() {
         </p>
       </div>
 
-      {/* Release banner */}
-      <div className="card" style={{ padding: "1.5rem 1.75rem", marginBottom: "2rem", borderLeft: "4px solid var(--accent)" }}>
+      {/* Release banner — informational status strip, not a link (flat, no card hover) */}
+      <div style={{ padding: "0.85rem 1.25rem", marginBottom: "2rem", borderLeft: "4px solid var(--accent)", background: "var(--accent-dim)", borderRadius: "6px" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: "12px", flexWrap: "wrap" }}>
           <span className="display" style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--navy)" }}>SPAM</span>
           <span className="mono" style={{ fontSize: "0.72rem", padding: "3px 10px", borderRadius: "999px", background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(47,125,209,0.25)" }}>v{VERSION}</span>
