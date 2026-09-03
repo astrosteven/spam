@@ -228,11 +228,14 @@ const QUERY_STR = ["field", "detectcat"];
 function makePredicate(query: string): ((r: IdxRow) => boolean) | { error: string } {
   let q = query.trim().toLowerCase();
   if (!q) return { error: "Type a condition, e.g.  za > 9 and m444 < 28" };
-  q = q.replace(/between\s+(-?[\d.]+)\s+and\s+(-?[\d.]+)/g, "between $1 :and: $2");
+  // Protect the "and" inside `between a and b` before splitting on the AND/OR
+  // connectors. Use a sentinel with no word chars so \band\b can't match it
+  // (":and:" fails — the colons are non-word, so the boundaries still match).
+  q = q.replace(/between\s+(-?[\d.]+)\s+and\s+(-?[\d.]+)/g, "between $1 \\u0001 $2");
   const connectors: string[] = q.match(/\b(and|or)\b/g) ?? [];
   const useOr = connectors.includes("or");
   if (useOr && connectors.includes("and")) return { error: "Mixing AND and OR isn't supported — use one." };
-  const parts = q.split(/\b(?:and|or)\b/).map(s => s.replace(/:and:/g, "and").trim()).filter(Boolean);
+  const parts = q.split(/\b(?:and|or)\b/).map(s => s.replace(/\\u0001/g, "and").trim()).filter(Boolean);
 
   const conds: ((r: IdxRow) => boolean)[] = [];
   for (const part of parts) {
@@ -969,7 +972,29 @@ export default function SearchPage() {
               }}
             />
             <div style={{ marginTop: "10px", fontSize: "0.75rem", color: "var(--text-dim)", fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.9 }}>
-              fields: <span style={{ color: "var(--text-muted)" }}>za, zl68, zu68, z_lowz, chia, m277, m444, zspec, rh_277, rh_444, kron_radius, a_image, b_image, x, y, depthtier, selected, inspected, sample, field, detectcat</span> · ops: <span style={{ color: "var(--text-muted)" }}>&gt; &lt; &gt;= &lt;= = != between…and</span>
+              <div style={{ marginBottom: "6px" }}>
+                ops: <span style={{ color: "var(--text-muted)" }}>&gt; &lt; &gt;= &lt;= = != between…and</span> · combine conditions with <span style={{ color: "var(--text-muted)" }}>and</span> / <span style={{ color: "var(--text-muted)" }}>or</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "1px 16px", color: "var(--text-muted)" }}>
+                {([
+                  ["za", "photometric redshift (best fit)"],
+                  ["zl68 / zu68", "68% credible interval on za"],
+                  ["z_lowz", "best z of the low-z (z<7) solution"],
+                  ["chia", "χ² of the best fit"],
+                  ["m277 / m444", "AB mag, F277W / F444W (Kron)"],
+                  ["zspec", "spectroscopic redshift (>0 if known)"],
+                  ["rh_277 / rh_444", "half-light radius (pixels)"],
+                  ["kron_radius", "Kron radius (pixels)"],
+                  ["a_image / b_image", "major / minor axis (pixels)"],
+                  ["ra / dec", "J2000, decimal degrees"],
+                  ["x / y", "pixel position on the mosaic"],
+                  ["depthtier", "imaging depth tier (integer)"],
+                  ["selected / inspected / sample", "flags (0 or 1)"],
+                  ["detectcat", "detection catalog: cold / hot"],
+                ] as [string, string][]).map(([k, v]) => (
+                  <div key={k}><span style={{ color: "var(--accent)" }}>{k}</span> — {v}</div>
+                ))}
+              </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
                 {[
                   "za > 9",
