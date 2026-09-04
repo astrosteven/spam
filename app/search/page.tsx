@@ -20,7 +20,7 @@ const MEDIUM_FILTERS = new Set(
 
 type SearchMode = "id" | "radec" | "upload" | "query";
 type ResultState = "idle" | "searching" | "found" | "notfound" | "multi" | "table";
-type QueryRow = { fc: typeof SEARCH_FIELDS[0]; id: number; za: number | null; m444: number | null; selected: number | null };
+type QueryRow = { fc: typeof SEARCH_FIELDS[0]; id: number; za: number | null; m444: number | null; zspec: number | null; selected: number | null; extra: (number | string | null)[] };
 
 interface SourceResult {
   field: string;
@@ -223,6 +223,23 @@ const QUERY_NUM = ["za", "zl68", "zu68", "z_lowz", "chia", "m277", "m444", "mabs
   "rh_277", "rh_444", "kron_radius", "a_image", "b_image", "x", "y", "depthtier",
   "ra", "dec", "selected", "inspected", "sample"];
 const QUERY_STR = ["field", "detectcat"];
+
+// Columns the results table always shows; other queried columns are added dynamically.
+const TABLE_FIXED_COLS = new Set(["id", "za", "m444", "zspec", "selected"]);
+function queriedColumns(query: string): string[] {
+  const q = query.toLowerCase();
+  const out: string[] = [];
+  for (const c of [...QUERY_NUM, ...QUERY_STR]) {
+    if (TABLE_FIXED_COLS.has(c) || out.includes(c)) continue;
+    if (new RegExp(`\\b${c}\\b`).test(q)) out.push(c);
+  }
+  return out;
+}
+function fmtCell(v: number | string | null): string {
+  if (v == null) return "—";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(+v.toFixed(3));
+  return String(v);
+}
 
 // Parse a WHERE-style expression into a predicate. Numeric fields support
 // > < >= <= = != and `between a and b`; string fields (field, detectcat) support = / !=.
@@ -645,6 +662,7 @@ export default function SearchPage() {
   const [uploadText, setUploadText] = useState("");
   const [queryInput, setQueryInput] = useState("za > 9 and m444 < 28 and selected = 1");
   const [queryRows, setQueryRows] = useState<QueryRow[]>([]);
+  const [queryCols, setQueryCols] = useState<string[]>([]);
   const [queryTotal, setQueryTotal] = useState(0);
   const [queryCard, setQueryCard] = useState<SourceResult | null>(null);
   const [queryCardId, setQueryCardId] = useState<number | null>(null);
@@ -695,6 +713,7 @@ export default function SearchPage() {
       if (mode === "query") {
         const pred = makePredicate(queryInput);
         if ("error" in pred) { setStatus("notfound"); setMatchSummary(pred.error); return; }
+        const cols = queriedColumns(queryInput);
         const CAP = 500;
         const rows: QueryRow[] = [];
         let total = 0;
@@ -716,11 +735,11 @@ export default function SearchPage() {
             };
             if (pred(r)) {
               total++;
-              if (rows.length < CAP) rows.push({ fc, id: idx.id[i], za: idx.za[i], m444: idx.m444?.[i] ?? null, selected: idx.selected?.[i] ?? null });
+              if (rows.length < CAP) rows.push({ fc, id: idx.id[i], za: idx.za[i], m444: idx.m444?.[i] ?? null, zspec: (r.zspec as number | null) ?? null, selected: idx.selected?.[i] ?? null, extra: cols.map(c => r[c] ?? null) });
             }
           }
         }
-        setResults([]); setQueryCard(null); setQueryRows(rows); setQueryTotal(total);
+        setResults([]); setQueryCard(null); setQueryRows(rows); setQueryCols(cols); setQueryTotal(total);
         if (total === 0) { setStatus("notfound"); setMatchSummary("No sources match that query."); }
         else {
           setStatus("table");
@@ -1080,7 +1099,7 @@ export default function SearchPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.8rem" }}>
               <thead>
                 <tr style={{ background: "rgba(47,125,209,0.07)" }}>
-                  {["ID", "z_a", "m₄₄₄", "selected", ""].map((h, i) => (
+                  {["ID", "z_a", "m₄₄₄", "zspec", ...queryCols, "selected", ""].map((h, i) => (
                     <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "8px 14px", color: "var(--text-dim)", fontWeight: 400, fontSize: "0.72rem", letterSpacing: "0.06em" }}>{h}</th>
                   ))}
                 </tr>
@@ -1099,12 +1118,16 @@ export default function SearchPage() {
                     <td style={{ padding: "7px 14px", color: "var(--accent)" }}>{r.id}</td>
                     <td style={{ padding: "7px 14px", textAlign: "right", color: "var(--text)" }}>{r.za != null ? r.za.toFixed(3) : "—"}</td>
                     <td style={{ padding: "7px 14px", textAlign: "right", color: "var(--text-muted)" }}>{r.m444 != null ? r.m444.toFixed(2) : "—"}</td>
+                    <td style={{ padding: "7px 14px", textAlign: "right", color: "var(--text-muted)" }}>{r.zspec != null && r.zspec > 0 ? r.zspec.toFixed(3) : "—"}</td>
+                    {r.extra.map((v, j) => (
+                      <td key={j} style={{ padding: "7px 14px", textAlign: "right", color: "var(--text-muted)" }}>{fmtCell(v)}</td>
+                    ))}
                     <td style={{ padding: "7px 14px", textAlign: "right", color: r.selected ? "var(--amber)" : "var(--text-dim)" }}>{r.selected == null ? "—" : r.selected ? "★" : "·"}</td>
                     <td style={{ padding: "7px 14px", textAlign: "right", color: "var(--accent2)", fontSize: "0.72rem" }}>{open ? "▾ close" : "view →"}</td>
                   </tr>
                   {open && (
                     <tr ref={cardRef}>
-                      <td colSpan={5} style={{ padding: "0.5rem 0.75rem 1rem", background: "rgba(47,125,209,0.04)" }}>
+                      <td colSpan={5 + queryCols.length} style={{ padding: "0.5rem 0.75rem 1rem", background: "rgba(47,125,209,0.04)" }}>
                         {queryCard && queryCard.row["ID"] === r.id
                           ? <ResultCard src={queryCard} />
                           : <div style={{ padding: "1.5rem", textAlign: "center", color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.8rem" }}>Loading…</div>}
