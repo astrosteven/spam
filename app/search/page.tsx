@@ -41,6 +41,8 @@ interface SourceResult {
   zspec?: number;
   zaCirc?: number;
   dchi2?: number;
+  mabs?: number;
+  beta?: number;
   aperflags?: number;
   neighbor?: { dClosest?: number; magClosest?: number; dBrightest?: number; magBrightest?: number };
   stampUrl?: string;
@@ -116,7 +118,7 @@ type NumCol = (number | null)[] | null;
 type FieldIndex = {
   field: string; version: string; n: number; filters: string[];
   id: number[]; ra: number[]; dec: number[]; za: (number | null)[];
-  m277: NumCol; m444: NumCol;
+  m277: NumCol; m444: NumCol; mabs?: NumCol; beta?: NumCol;
   selected: NumCol; inspected: NumCol; sample: NumCol;
   zl68?: NumCol; zu68?: NumCol; z_lowz?: NumCol; chia?: NumCol; zspec?: NumCol;
   rh_277?: NumCol; rh_444?: NumCol; kron_radius?: NumCol; a_image?: NumCol; b_image?: NumCol;
@@ -197,7 +199,7 @@ async function fetchObject(fc: typeof SEARCH_FIELDS[0], id: number, zg: ZGrid): 
       sedWave: zg.sedWave, sed: o.sed, sedLowz: o.sedLowz,
       selected: o.selected, inspected: o.inspected, sample: o.sample,
       interestLabel: o.interestLabel, zspec: o.zspec,
-      zaCirc: o.zaCirc, dchi2: o.dchi2, aperflags: o.aperflags, neighbor: o.neighbor,
+      zaCirc: o.zaCirc, dchi2: o.dchi2, mabs: o.mabs, beta: o.beta, aperflags: o.aperflags, neighbor: o.neighbor,
       stampUrl: `${webBase(corralBase(), fc.dir)}/stamps/${fc.prefix}_${id}.png`,
       selFail,
     };
@@ -217,7 +219,7 @@ function angSep(ra1: number, dec1: number, ra2: number, dec2: number): number {
 // ---- SQL-style query over the search index ---------------------------------
 type IdxRow = Record<string, number | string | null>;
 // Numeric queryable columns (must exist in the index).
-const QUERY_NUM = ["za", "zl68", "zu68", "z_lowz", "chia", "m277", "m444", "zspec",
+const QUERY_NUM = ["za", "zl68", "zu68", "z_lowz", "chia", "m277", "m444", "mabs", "beta", "zspec",
   "rh_277", "rh_444", "kron_radius", "a_image", "b_image", "x", "y", "depthtier",
   "ra", "dec", "selected", "inspected", "sample"];
 const QUERY_STR = ["field", "detectcat"];
@@ -618,6 +620,8 @@ function ResultCard({ src }: { src: SourceResult }) {
             ["Δχ²",   src.dchi2 != null ? src.dchi2.toFixed(1) : "—"],
             ["m₂₇₇",  flux2mag(f277)],
             ["m₄₄₄",  flux2mag(f444)],
+            ["M_UV",   src.mabs != null ? src.mabs.toFixed(2) : "—"],
+            ["β",      src.beta != null ? src.beta.toFixed(2) : "—"],
             ["rh,277", rh277 > 0 ? `${rh277.toFixed(2)}px` : "—"],
             ["rh,444", rh444 > 0 ? `${rh444.toFixed(2)}px` : "—"],
           ].map(([label, val]) => (
@@ -700,6 +704,7 @@ export default function SearchPage() {
             const r: IdxRow = {
               field: idx.field, za: idx.za[i], ra: idx.ra[i], dec: idx.dec[i],
               m277: idx.m277?.[i] ?? null, m444: idx.m444?.[i] ?? null,
+              mabs: idx.mabs?.[i] ?? null, beta: idx.beta?.[i] ?? null,
               zl68: idx.zl68?.[i] ?? null, zu68: idx.zu68?.[i] ?? null, z_lowz: idx.z_lowz?.[i] ?? null,
               chia: idx.chia?.[i] ?? null, zspec: idx.zspec?.[i] ?? null,
               rh_277: idx.rh_277?.[i] ?? null, rh_444: idx.rh_444?.[i] ?? null,
@@ -982,6 +987,8 @@ export default function SearchPage() {
                   ["z_lowz", "best z of the low-z (z<7) solution"],
                   ["chia", "χ² of the best fit"],
                   ["m277 / m444", "AB mag, F277W / F444W (Kron)"],
+                  ["mabs", "absolute UV magnitude M_UV (rest 1500 Å)"],
+                  ["beta", "rest-UV continuum slope β"],
                   ["zspec", "spectroscopic redshift (>0 if known)"],
                   ["rh_277 / rh_444", "half-light radius (pixels)"],
                   ["kron_radius", "Kron radius (pixels)"],
@@ -1137,6 +1144,8 @@ const DL_COLS: { key: string; label: string; get: (s: SourceResult) => unknown }
   { key: "CHIA",      label: "chi2",     get: s => s.pz["CHIA"] },
   { key: "m277",      label: "m277",     get: s => magOr(s.row["FLUX_F277W"]) },
   { key: "m444",      label: "m444",     get: s => magOr(s.row["FLUX_F444W"]) },
+  { key: "mabs",      label: "M_UV",     get: s => s.mabs },
+  { key: "beta",      label: "beta",     get: s => s.beta },
   { key: "RH_F277W",  label: "rh277",    get: s => s.row["RH_F277W"] },
   { key: "RH_F444W",  label: "rh444",    get: s => s.row["RH_F444W"] },
   { key: "DEPTHTIER", label: "depthtier",get: s => s.row["DEPTHTIER"] },
