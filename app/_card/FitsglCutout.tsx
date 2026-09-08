@@ -38,8 +38,11 @@ export const CAMPFIRE_TRILOGY = { noiselum: 0.12, satpercent: 0.01, noisesig: 2.
 // Per-field fitsgl base URL. SPAM is CEERS-only; the CEERS tiles are the shared ones
 // under unicorn/fitsgl/ceers on Corral. Keys match SEARCH_FIELDS[].field ("SPAM").
 const FITSGL_ROOT = "https://web.corral.tacc.utexas.edu/unicorn/fitsgl";
+// The per-object card JSON reports field "CEERS" (the underlying field), while the site
+// field config calls it "SPAM"; accept both so the cutout renders however it's reached.
 export const FITSGL_BASE: Record<string, string> = {
-  "SPAM": `${FITSGL_ROOT}/ceers`,
+  "SPAM":  `${FITSGL_ROOT}/ceers`,
+  "CEERS": `${FITSGL_ROOT}/ceers`,
 };
 
 // The default cutout field of view, arcsec (matches the retired static RGB stamp).
