@@ -12,6 +12,7 @@ import {
   loadField,
   loadFilters,
   loadSpecz,
+  loadLabels,
   fetchObject,
   angSep,
   campfireUrl,
@@ -26,7 +27,7 @@ import {
   type SpeczRec,
 } from "@/app/_card/objectCard";
 
-type SearchMode = "id" | "radec" | "upload" | "query";
+type SearchMode = "id" | "name" | "radec" | "upload" | "query";
 type ResultState = "idle" | "searching" | "found" | "notfound" | "multi" | "table";
 type QueryRow = { fc: FieldConfig; id: number; za: number | null; m444: number | null; zspec: number | null; selected: number | null; cz: SpeczRec | null; extra: (number | string | null)[] };
 
@@ -274,6 +275,7 @@ function CardPlots({ src }: { src: SourceResult }) {
 export default function SearchPage() {
   const [mode, setMode] = useState<SearchMode>("id");
   const [idInput, setIdInput] = useState("");
+  const [nameInput, setNameInput] = useState("");
   const [raInput, setRaInput] = useState("");
   const [decInput, setDecInput] = useState("");
   const [radiusInput, setRadiusInput] = useState("0.2");
@@ -517,6 +519,30 @@ export default function SearchPage() {
         return;
       }
 
+      // Name mode: match the typed text against the curated famous-object labels.
+      // Labels carry field "CEERS"; SPAM is CEERS-only, so any hit resolves to the
+      // single available field (fall back to it if the field name doesn't match).
+      if (mode === "name") {
+        const q = nameInput.trim().toLowerCase();
+        if (!q) { setStatus("notfound"); setMatchSummary("Type a name, e.g. Maisie or CEERS 1019."); return; }
+        const labels = await loadLabels();
+        const hits = labels.filter(l =>
+          l.name.toLowerCase().includes(q) || (l.aka ?? []).some(a => a.toLowerCase().includes(q)));
+        const named: SourceResult[] = [];
+        for (const l of hits) {
+          const fc = fields.find(f => f.field === l.field) ?? (fields.length === 1 ? fields[0] : undefined);
+          if (!fc) continue;
+          const { zg } = await loadField(fc);
+          const src = await fetchObject(fc, l.id, zg);
+          if (src) named.push(src);
+        }
+        if (named.length === 0) { setStatus("notfound"); setMatchSummary(`No named object matches "${nameInput.trim()}".`); return; }
+        setResults(named);
+        if (named.length === 1) setStatus("found");
+        else { setStatus("multi"); setMatchSummary(`${named.length} named matches.`); }
+        return;
+      }
+
       const found: SourceResult[] = [];
       let requested = 1;
 
@@ -650,6 +676,7 @@ export default function SearchPage() {
         <div style={{ display: "flex", gap: "4px", marginBottom: "1.5rem" }}>
           {([
             { key: "id",     label: "By ID" },
+            { key: "name",   label: "By Name" },
             { key: "radec",  label: "By RA/Dec" },
             { key: "upload", label: "Upload List" },
             { key: "query",  label: "Query" },
@@ -690,6 +717,35 @@ export default function SearchPage() {
               />
             </div>
             <SearchButton onClick={doSearch} loading={status === "searching"} />
+          </div>
+        )}
+
+        {/* Name input — famous named objects (Maisie's Galaxy, CEERS 1019, …) */}
+        {mode === "name" && (
+          <div>
+            <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: "220px" }}>
+                <label style={{ display: "block", fontSize: "0.72rem", color: "var(--text-dim)", fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.1em", marginBottom: "6px" }}>
+                  OBJECT NAME
+                </label>
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={e => setNameInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && doSearch()}
+                  placeholder="e.g. Maisie, CEERS 1019, CEERS-2112"
+                  style={{
+                    width: "100%", background: "#fff", border: "1px solid var(--border-bright)",
+                    borderRadius: "4px", padding: "9px 12px", color: "var(--text)",
+                    fontSize: "0.95rem", fontFamily: "'JetBrains Mono', monospace", outline: "none",
+                  }}
+                />
+              </div>
+              <SearchButton onClick={doSearch} loading={status === "searching"} />
+            </div>
+            <p style={{ marginTop: "10px", fontSize: "0.75rem", color: "var(--text-dim)", fontFamily: "'JetBrains Mono', monospace" }}>
+              Searches a curated list of famous objects in the field by nickname / alias.
+            </p>
           </div>
         )}
 
