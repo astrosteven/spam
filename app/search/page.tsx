@@ -106,6 +106,7 @@ function neededIndexCols(query: string): string[] {
 
 // Columns the results table always shows; other queried columns are added dynamically.
 const TABLE_FIXED_COLS = new Set(["id", "za", "m444", "zspec", "selected"]);
+const TABLE_CAP = 500;   // rows rendered in the results table (full set is retained separately)
 function queriedColumns(query: string): string[] {
   const q = query.toLowerCase();
   const out: string[] = [];
@@ -119,6 +120,41 @@ function fmtCell(v: number | string | null): string {
   if (v == null) return "—";
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(+v.toFixed(3));
   return String(v);
+}
+
+// ---- Sortable results table -------------------------------------------------
+// One entry of the FULL retained match set (queryAllRef): field cfg + index row + campfire.
+// SPAM is single-field, so there is no sortable "field" column (see sortValueGetter).
+type MatchEntry = { fc: FieldConfig; id: number; r: IdxRow; cz: SpeczRec | null };
+type SortState = { col: string | null; dir: "asc" | "desc" };
+// Value-extractor for a sortable column, keyed by the header label / dynamic queryCol name.
+function sortValueGetter(col: string): (m: MatchEntry) => number | string | null {
+  switch (col) {
+    case "ID":       return m => m.id;
+    case "z_a":      return m => (typeof m.r.za === "number" ? m.r.za : null);
+    case "m₄₄₄":     return m => (typeof m.r.m444 === "number" ? m.r.m444 : null);
+    case "zspec":    return m => (typeof m.r.zspec === "number" && m.r.zspec > 0 ? m.r.zspec : null);
+    case "campfire": return m => (m.cz && typeof m.cz.z === "number" ? m.cz.z : null);
+    case "selected": return m => (typeof m.r.selected === "number" ? m.r.selected : null);
+    default: { const g = colGetter(col); return m => g(m.r); }   // dynamic queryCol
+  }
+}
+// Non-sortable header labels (links / expand arrow — no meaningful order).
+const UNSORTABLE_COLS = new Set(["", "map"]);
+// Sort a copy of the full match set by `col`/`dir`; nulls always sort to the END.
+function sortMatches(all: MatchEntry[], col: string, dir: "asc" | "desc"): MatchEntry[] {
+  const get = sortValueGetter(col);
+  const sign = dir === "asc" ? 1 : -1;
+  const keyed = all.map(m => ({ m, v: get(m) }));
+  keyed.sort((a, b) => {
+    const av = a.v, bv = b.v;
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;    // nulls last, both directions
+    if (bv == null) return -1;
+    if (typeof av === "number" && typeof bv === "number") return (av - bv) * sign;
+    return String(av).localeCompare(String(bv)) * sign;
+  });
+  return keyed.map(k => k.m);
 }
 
 // Parse a WHERE-style expression into a predicate + the raw index columns it needs attached.
@@ -246,6 +282,7 @@ export default function SearchPage() {
   const [viewColsInput, setViewColsInput] = useState("");   // extra columns to SHOW (not filter on)
   const [queryRows, setQueryRows] = useState<QueryRow[]>([]);
   const [queryCols, setQueryCols] = useState<string[]>([]);
+  const [sort, setSort] = useState<SortState>({ col: null, dir: "asc" });
   const [defsOpen, setDefsOpen] = useState(false);
   const [queryTotal, setQueryTotal] = useState(0);
   const [queryCard, setQueryCard] = useState<SourceResult | null>(null);
@@ -258,7 +295,35 @@ export default function SearchPage() {
   const cardRef = useRef<HTMLTableRowElement>(null);
   // Every matched object (index row + campfire match), retained for the FULL-list
   // download — not just the ≤500 rendered in the table.
-  const queryAllRef = useRef<{ fc: typeof SEARCH_FIELDS[0]; id: number; r: IdxRow; cz: SpeczRec | null }[]>([]);
+  const queryAllRef = useRef<MatchEntry[]>([]);
+
+  // Build one displayed table row from a full-match entry — same shape the query loop produces.
+  function displayRow(m: MatchEntry, cols: string[]): QueryRow {
+    return {
+      fc: m.fc, id: m.id,
+      za: (typeof m.r.za === "number" ? m.r.za : null),
+      m444: (typeof m.r.m444 === "number" ? m.r.m444 : null),
+      zspec: (typeof m.r.zspec === "number" ? m.r.zspec : null),
+      selected: (typeof m.r.selected === "number" ? m.r.selected : null),
+      cz: m.cz,
+      extra: cols.map(c => colGetter(c)(m.r)),
+    };
+  }
+
+  // Toggle sort on a header click and rebuild the displayed rows from the FULL match set:
+  // sort queryAllRef (all matches, not just the visible 500) → take the top CAP. A third
+  // click on the active column clears the sort back to match order.
+  function onSortClick(col: string) {
+    if (UNSORTABLE_COLS.has(col)) return;
+    let next: SortState;
+    if (sort.col !== col) next = { col, dir: "asc" };
+    else if (sort.dir === "asc") next = { col, dir: "desc" };
+    else next = { col: null, dir: "asc" };   // third click → clear
+    setSort(next);
+    const all = queryAllRef.current;
+    const ordered = next.col ? sortMatches(all, next.col, next.dir) : all;
+    setQueryRows(ordered.slice(0, TABLE_CAP).map(m => displayRow(m, queryCols)));
+  }
 
   // Bundle a "result card" per shown row into one zip: the cutout montage (from Corral),
   // plus the SED and P(z) plots rasterized to PNG. Per-object detail is fetched concurrently;
@@ -404,7 +469,7 @@ export default function SearchPage() {
         const cols = [...new Set([...queriedColumns(queryInput), ...viewCols])];
         const need = [...new Set([...pred.need, ...neededIndexCols(viewCols.join(" "))])];  // flux cols to attach
         const getters = cols.map(c => colGetter(c));   // value-extractors for the dynamic table cols
-        const CAP = 500;              // rows rendered in the table
+        const CAP = TABLE_CAP;        // rows rendered in the table
         const DL_CAP = 100000;        // rows retained for the full-list download
         const rows: QueryRow[] = [];
         const all: { fc: typeof SEARCH_FIELDS[0]; id: number; r: IdxRow; cz: SpeczRec | null }[] = [];
@@ -442,6 +507,7 @@ export default function SearchPage() {
           }
         }
         queryAllRef.current = all;
+        setSort({ col: null, dir: "asc" });   // fresh search starts in match order
         setResults([]); setQueryCard(null); setQueryRows(rows); setQueryCols(cols); setQueryTotal(total);
         if (total === 0) { setStatus("notfound"); setMatchSummary("No sources match that query."); }
         else {
@@ -859,7 +925,12 @@ export default function SearchPage() {
         <div>
           <div className="card" style={{ padding: "1rem 1.25rem", marginBottom: "1rem", borderLeft: "3px solid var(--green)", background: "rgba(126,207,176,0.05)" }}>
             <span className="mono" style={{ color: "var(--green)", fontSize: "0.75rem", marginRight: "10px" }}>QUERY</span>
-            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>{matchSummary} Click a row to view its bio plot.</span>
+            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+              {sort.col
+                ? `${queryTotal.toLocaleString()} source${queryTotal === 1 ? "" : "s"} match — sorted by ${sort.col} ${sort.dir === "asc" ? "▲" : "▼"}${queryTotal > queryRows.length ? ` — showing top ${queryRows.length}` : ""}. `
+                : `${matchSummary} `}
+              Click a column header to sort; click a row to view its bio plot.
+            </span>
           </div>
 
           <DownloadControls
@@ -880,9 +951,20 @@ export default function SearchPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.8rem" }}>
               <thead>
                 <tr style={{ background: "rgba(47,125,209,0.07)" }}>
-                  {["ID", "z_a", "m₄₄₄", "zspec", "campfire", ...queryCols, "selected", "map", ""].map((h, i) => (
-                    <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "8px 14px", color: "var(--text-dim)", fontWeight: 400, fontSize: "0.72rem", letterSpacing: "0.06em" }}>{h}</th>
-                  ))}
+                  {["ID", "z_a", "m₄₄₄", "zspec", "campfire", ...queryCols, "selected", "map", ""].map((h, i) => {
+                    const sortable = !UNSORTABLE_COLS.has(h);
+                    const active = sort.col === h && sortable;
+                    return (
+                    <th key={i} onClick={sortable ? () => onSortClick(h) : undefined}
+                      title={sortable ? "Sort by this column (sorts all matches)" : undefined}
+                      style={{ textAlign: i === 0 ? "left" : "right", padding: "8px 14px",
+                        color: active ? "var(--accent)" : "var(--text-dim)", fontWeight: 400, fontSize: "0.72rem",
+                        letterSpacing: "0.06em", cursor: sortable ? "pointer" : "default",
+                        userSelect: "none", whiteSpace: "nowrap" }}>
+                      {h}{active ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+                    </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
