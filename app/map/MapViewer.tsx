@@ -183,6 +183,7 @@ export default function MapViewer({
   const [idx, setIdx] = useState<FieldIndex | null>(null);
   const [magCol, setMagCol] = useState<NumCol>(null);
   const [glyphs, setGlyphs] = useState<Glyph[]>([]);
+  const [showSources, setShowSources] = useState(true);   // hide to screenshot a clean colour image
   const [trilogy, setTrilogy] = useState<TrilogyParams>(CAMPFIRE_TRILOGY);
   const [panelOpen, setPanelOpen] = useState(true);
 
@@ -459,7 +460,8 @@ export default function MapViewer({
         style={{ width: "100%", height: "100%" }}
       />
       {/* Overlay layer — pointer-events only on the glyphs, so panning the map still
-          works everywhere between sources. */}
+          works everywhere between sources. Hidden via the toggle for clean colour screenshots. */}
+      {showSources && (
       <svg
         data-overlay="sources"
         width="100%" height="100%"
@@ -492,6 +494,21 @@ export default function MapViewer({
           );
         })}
       </svg>
+      )}
+
+      {/* Sources on/off toggle — bottom-left. Off = clean colour image for screenshots. */}
+      <button
+        onClick={() => setShowSources(s => !s)}
+        className="mono"
+        title={showSources ? "Hide catalog sources" : "Show catalog sources"}
+        style={{
+          position: "absolute", left: 14, bottom: 14, zIndex: 16,
+          background: "rgba(255,255,255,0.92)", border: "1px solid var(--border-bright)", borderRadius: "5px",
+          color: "var(--text)", cursor: "pointer", fontSize: "0.72rem", padding: "5px 9px",
+        }}
+      >
+        {showSources ? "◉ sources" : "○ sources"}
+      </button>
 
       {/* SCALING panel — top-right. Drives the trilogy stretch live via applyScaling. */}
       <ScalingPanel
