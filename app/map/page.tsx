@@ -74,6 +74,7 @@ export default function MapPage() {
   const [filters, setFilters] = useState<MapFilters>(DEFAULT_FILTERS);
   const [shown, setShown] = useState<number | null>(null);
   const [gotoMsg, setGotoMsg] = useState<string>("");
+  const [queryError, setQueryError] = useState<string>("");
 
   const handleRef = useRef<FitsViewerHandle | null>(null);
   const idxRef = useRef<FieldIndex | null>(null);
@@ -193,7 +194,7 @@ export default function MapPage() {
 
       {/* Sidebar + viewer + card panel */}
       <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
-        <FilterSidebar filters={filters} setFilters={setFilters} shown={shown} />
+        <FilterSidebar filters={filters} setFilters={setFilters} shown={shown} queryError={queryError} />
 
         <div ref={viewerBoxRef} style={{ flex: 1, minWidth: 0, position: "relative", background: "#0d0a1a" }}>
           <MapViewer
@@ -203,6 +204,7 @@ export default function MapPage() {
             onSourceClick={openSource}
             onCount={setShown}
             onReadyHandle={onReadyHandle}
+            onQueryError={setQueryError}
           />
         </div>
 
@@ -293,10 +295,11 @@ function GotoBox({ onGo, msg }: { onGo: (v: string) => void; msg: string }) {
 
 // ---- Filter sidebar --------------------------------------------------------
 function FilterSidebar({
-  filters, setFilters, shown,
+  filters, setFilters, shown, queryError,
 }: {
   filters: MapFilters;
   setFilters: React.Dispatch<React.SetStateAction<MapFilters>>;
+  queryError?: string;
   shown: number | null;
 }) {
   const num = (s: string): number | null => (s.trim() === "" ? null : (Number.isFinite(+s) ? +s : null));
@@ -356,6 +359,23 @@ function FilterSidebar({
             defaultValue={filters.magMax ?? ""} onBlur={e => patch({ magMax: num(e.target.value) })}
             onKeyDown={e => { if (e.key === "Enter") patch({ magMax: num((e.target as HTMLInputElement).value) }); }} />
         </div>
+      </div>
+
+      <div style={{ marginBottom: "1.1rem" }}>
+        <div style={labelStyle}>Query <span style={{ textTransform: "none", letterSpacing: 0, color: "var(--text-muted)" }}>za · m444 · mag_f150w…</span></div>
+        <textarea
+          style={{ ...inputStyle, minHeight: "54px", resize: "vertical", lineHeight: 1.4 }}
+          placeholder="za > 8 and mag_f150w < 28"
+          defaultValue={filters.query}
+          onBlur={e => patch({ query: e.target.value.trim() })}
+          onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) patch({ query: (e.target as HTMLTextAreaElement).value.trim() }); }}
+        />
+        <div style={{ fontSize: "0.62rem", color: "var(--text-dim)", marginTop: "3px", lineHeight: 1.45 }}>
+          Same query language as Search (per-filter mag/snr, colors, int_pz, czspec). Blur or ⌘/Ctrl+Enter to apply.
+        </div>
+        {queryError && filters.query ? (
+          <div style={{ fontSize: "0.65rem", color: "#c0392b", marginTop: "5px", lineHeight: 1.4 }}>{queryError}</div>
+        ) : null}
       </div>
 
       <button

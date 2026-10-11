@@ -11,6 +11,7 @@ import {
   corralBase,
   loadField,
   loadFilters,
+  loadIntPz,
   loadSpecz,
   loadLabels,
   fetchObject,
@@ -33,8 +34,17 @@ type QueryRow = { fc: FieldConfig; id: number; za: number | null; m444: number |
 
 // ---- SQL-style query over the search index ---------------------------------
 type IdxRow = Record<string, number | string | null>;
+// Integrated-P(z) columns (INT_*), lazy-loaded from the <prefix>_intpz sidecar (not the base
+// index — there are ~40, too heavy to hold in memory). Queryable like any column.
+const INT_PZ_COLS: string[] = [
+  "int_cen", "int_zgtza_2",
+  ...Array.from({ length: 21 }, (_, i) => `int_pz${i}`),        // int_pz0..int_pz20 (unit-z bins)
+  "int_pz9p5_12", "int_pz12_15", "int_pz15_20", "int_pz20_35",  // named high-z ranges
+  ...Array.from({ length: 15 }, (_, i) => `int_zgt${i + 1}`),   // int_zgt1..int_zgt15 (P(z>n))
+];
+const INT_PZ_SET = new Set(INT_PZ_COLS);
 // Numeric queryable columns (must exist in the index).
-const QUERY_NUM = ["za", "zl68", "zu68", "z_lowz", "chia", "m277", "m444", "mabs", "beta", "zspec",
+const QUERY_NUM = ["za", "zl68", "zu68", "z_lowz", "chia", "chia_lowz", "m277", "m444", "m1500", "m1300", "mabs", "beta", "zspec",
   "czspec", "czqual",
   "rh_277", "rh_444", "kron_radius", "a_image", "b_image", "x", "y", "depthtier",
   "ra", "dec", "selected", "inspected", "sample"];
@@ -52,10 +62,14 @@ const KNOWN_FILTERS = new Set(Object.keys(FILTER_WAVES).map(f => f.toLowerCase()
 const RE_MAGSNR = /^(mag|snr|flux)_([a-z0-9]+)$/;
 const RE_COLOR  = /^([a-z][a-z0-9]*)-([a-z][a-z0-9]*)$/;
 const LIMIT_SNR = 1;   // bands with S/N below this are treated as non-detections in colors
+// A fluxerr at/above this is a no-coverage SENTINEL (the catalog fills ~1e12), NOT a real 1σ
+// uncertainty. Treat such a band as unavailable so out-of-footprint sources don't get nonsense
+// colors or absurd SNRs.
+const SENTINEL_ERR = 1e9;
 
-// Is `f` a queryable field name (built-in, per-filter, or color)?
+// Is `f` a queryable field name (built-in, per-filter, color, or int_pz)?
 function isKnownField(f: string): boolean {
-  if (QUERY_NUM.includes(f) || QUERY_STR.includes(f)) return true;
+  if (QUERY_NUM.includes(f) || QUERY_STR.includes(f) || INT_PZ_SET.has(f)) return true;
   let m: RegExpMatchArray | null;
   if ((m = f.match(RE_MAGSNR))) return KNOWN_FILTERS.has(m[2]);
   if ((m = f.match(RE_COLOR)))  return KNOWN_FILTERS.has(m[1]) && KNOWN_FILTERS.has(m[2]);
@@ -65,12 +79,12 @@ function isKnownField(f: string): boolean {
 // 1σ upper limit (= fluxerr). Returns null if the band's flux/err aren't available.
 function bandColorFlux(r: IdxRow, band: string): number | null {
   const f = r[`flux_${band}`], e = r[`fluxerr_${band}`];
-  if (typeof f !== "number" || typeof e !== "number" || !(e > 0)) return null;
+  if (typeof f !== "number" || typeof e !== "number" || !(e > 0) || e >= SENTINEL_ERR) return null;
   const used = (f / e >= LIMIT_SNR) ? f : e;   // non-detection → 1σ limit
   return used > 0 ? used : null;
 }
 // A value-extractor for a column, all derived from the native stored flux_<f>/fluxerr_<f>.
-function colGetter(col: string): (r: IdxRow) => number | string | null {
+export function colGetter(col: string): (r: IdxRow) => number | string | null {
   let m: RegExpMatchArray | null;
   if ((m = col.match(/^flux_([a-z0-9]+)$/)) && KNOWN_FILTERS.has(m[1])) {
     const fc = `flux_${m[1]}`;
@@ -82,7 +96,7 @@ function colGetter(col: string): (r: IdxRow) => number | string | null {
   }
   if ((m = col.match(/^snr_([a-z0-9]+)$/)) && KNOWN_FILTERS.has(m[1])) {
     const fc = `flux_${m[1]}`, ec = `fluxerr_${m[1]}`;
-    return r => { const f = r[fc], e = r[ec]; return (typeof f === "number" && typeof e === "number" && e > 0) ? f / e : null; };
+    return r => { const f = r[fc], e = r[ec]; return (typeof f === "number" && typeof e === "number" && e > 0 && e < SENTINEL_ERR) ? f / e : null; };
   }
   if ((m = col.match(RE_COLOR)) && KNOWN_FILTERS.has(m[1]) && KNOWN_FILTERS.has(m[2])) {
     const a = m[1], b = m[2];
@@ -105,6 +119,13 @@ function neededIndexCols(query: string): string[] {
   return cols;
 }
 
+// Integrated-P(z) columns a query references (as whole words) — attached on-demand from the
+// lazy <prefix>_intpz sidecar, exactly like the per-filter fluxes.
+function neededIntPz(query: string): string[] {
+  const q = query.toLowerCase();
+  return INT_PZ_COLS.filter(c => new RegExp(`\\b${c}\\b`).test(q));
+}
+
 // Columns the results table always shows; other queried columns are added dynamically.
 const TABLE_FIXED_COLS = new Set(["id", "za", "m444", "zspec", "selected"]);
 const TABLE_CAP = 500;   // rows rendered in the results table (full set is retained separately)
@@ -112,7 +133,7 @@ function queriedColumns(query: string): string[] {
   const q = query.toLowerCase();
   const out: string[] = [];
   const add = (c: string) => { if (!TABLE_FIXED_COLS.has(c) && !out.includes(c)) out.push(c); };
-  for (const c of [...QUERY_NUM, ...QUERY_STR]) if (new RegExp(`\\b${c}\\b`).test(q)) add(c);
+  for (const c of [...QUERY_NUM, ...QUERY_STR, ...INT_PZ_COLS]) if (new RegExp(`\\b${c}\\b`).test(q)) add(c);
   for (const m of q.matchAll(/\b(?:mag|snr|flux)_[a-z0-9]+\b/g)) { const c = m[0]; if (isKnownField(c)) add(c); }
   for (const m of q.matchAll(/\b[a-z][a-z0-9]*-[a-z][a-z0-9]*\b/g)) { const c = m[0]; if (isKnownField(c)) add(c); }
   return out;
@@ -159,57 +180,117 @@ function sortMatches(all: MatchEntry[], col: string, dir: "asc" | "desc"): Match
 }
 
 // Parse a WHERE-style expression into a predicate + the raw index columns it needs attached.
-// Numeric fields support > < >= <= = != and `between a and b`; string fields (field, detectcat)
-// support = / !=. Per-filter mag_<f>/snr_<f>/flux_<f> and colors <a>-<b> are numeric.
-// A single connector level (all AND or all OR).
-function makePredicate(query: string): { test: (r: IdxRow) => boolean; need: string[] } | { error: string } {
+// Recursive-descent: parentheses, mixed AND/OR (AND binds tighter), `= none`/`!= none`
+// missing-value tests, `between a and b`, separator-insensitive `field=`. Per-filter
+// mag_<f>/snr_<f>/flux_<f> and colors <a>-<b> are numeric. Exported so the map reuses it.
+type Pred = (r: IdxRow) => boolean;
+export function makePredicate(query: string): { test: Pred; need: string[] } | { error: string } {
   let q = query.trim().toLowerCase();
   if (!q) return { error: "Type a condition, e.g.  za > 9 and m444 < 28" };
-  // Protect the "and" inside `between a and b` before splitting on the AND/OR
-  // connectors. Use a sentinel with no word chars so \band\b can't match it
-  // (":and:" fails — the colons are non-word, so the boundaries still match).
-  q = q.replace(/between\s+(-?[\d.]+)\s+and\s+(-?[\d.]+)/g, "between $1 \\u0001 $2");
-  const connectors: string[] = q.match(/\b(and|or)\b/g) ?? [];
-  const useOr = connectors.includes("or");
-  if (useOr && connectors.includes("and")) return { error: "Mixing AND and OR isn't supported — use one." };
-  const parts = q.split(/\b(?:and|or)\b/).map(s => s.replace(/\\u0001/g, "and").trim()).filter(Boolean);
+  // Protect the "and" inside `between a and b` so tokenizing on AND/OR won't split it.
+  // "__and__" has no \band\b boundary (underscores are word chars), so the tokenizer skips it.
+  q = q.replace(/between\s+(-?[\d.]+)\s+and\s+(-?[\d.]+)/g, "between $1 __and__ $2");
 
-  // Field token: a built-in/mag_/snr_/flux_ name, or a color `<filtA>-<filtB>`.
   const FIELD = "([a-z][\\w]*(?:-[a-z0-9]+)?)";
-  const conds: ((r: IdxRow) => boolean)[] = [];
-  for (const part of parts) {
+  // Parse ONE leaf condition -> predicate (or an error).
+  function parseLeaf(raw: string): Pred | { error: string } {
+    const part = raw.replace(/__and__/g, "and").trim();
     let m: RegExpMatchArray | null;
     if ((m = part.match(new RegExp(`^${FIELD}\\s+between\\s+(-?[\\d.]+)\\s+and\\s+(-?[\\d.]+)$`)))) {
       const f = m[1], lo = parseFloat(m[2]), hi = parseFloat(m[3]);
       if (!isKnownField(f)) return { error: `Unknown field "${f}"` };
       if (QUERY_STR.includes(f)) return { error: `"${f}" can't use between (not numeric)` };
       const get = colGetter(f);
-      conds.push(r => { const v = get(r); return typeof v === "number" && v >= lo && v <= hi; });
-    } else if ((m = part.match(new RegExp(`^${FIELD}\\s*(>=|<=|!=|==|=|>|<)\\s*(.+)$`)))) {
+      return r => { const v = get(r); return typeof v === "number" && v >= lo && v <= hi; };
+    }
+    if ((m = part.match(new RegExp(`^${FIELD}\\s*(>=|<=|!=|==|=|>|<)\\s*(.+)$`)))) {
       const f = m[1], op = m[2], valraw = m[3].trim().replace(/^['"]|['"]$/g, "");
       if (!isKnownField(f)) return { error: `Unknown field "${f}"` };
       if (QUERY_STR.includes(f)) {
         if (op !== "=" && op !== "==" && op !== "!=") return { error: `use = or != on "${f}"` };
-        conds.push(r => { const v = r[f]; if (v == null) return false; const eq = String(v).toLowerCase() === valraw; return op === "!=" ? !eq : eq; });
-      } else {
-        const x = parseFloat(valraw);
-        if (!Number.isFinite(x)) return { error: `"${valraw}" is not a number` };
-        const get = colGetter(f);
-        conds.push(r => {
-          const v = get(r);
-          if (typeof v !== "number" || !Number.isFinite(v)) return false;
-          switch (op) {
-            case ">": return v > x; case "<": return v < x;
-            case ">=": return v >= x; case "<=": return v <= x;
-            case "!=": return v !== x; default: return v === x;
-          }
-        });
+        // Field names compare separator-insensitively (so `field = goodss` matches "GOODS-S").
+        const norm = (s: string) => (f === "field" ? s.toLowerCase().replace(/[\s_-]/g, "") : s.toLowerCase());
+        const want = norm(valraw);
+        return r => { const v = r[f]; if (v == null) return false; const eq = norm(String(v)) === want; return op === "!=" ? !eq : eq; };
       }
-    } else {
-      return { error: `Could not parse "${part}". Try  field op value  (e.g. za > 9).` };
+      if (valraw === "none" || valraw === "null") {   // missing-value test, e.g. czspec = none
+        if (op !== "=" && op !== "==" && op !== "!=") return { error: `use = or != with "none"` };
+        const get = colGetter(f);
+        return r => { const v = get(r); const missing = v == null || (typeof v === "number" && !Number.isFinite(v)); return op === "!=" ? !missing : missing; };
+      }
+      // Reject trailing garbage so a missing space (e.g. `za>8and selected=1`) errors instead of
+      // silently parsing as 8 and dropping the rest of the query.
+      if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(valraw))
+        return { error: `"${valraw}" isn't a plain number — check for a missing space around and/or (e.g. "za > 8 and selected = 1")` };
+      const x = parseFloat(valraw);
+      if (!Number.isFinite(x)) return { error: `"${valraw}" is not a number` };
+      const get = colGetter(f);
+      return r => {
+        const v = get(r);
+        if (typeof v !== "number" || !Number.isFinite(v)) return false;
+        switch (op) {
+          case ">": return v > x; case "<": return v < x;
+          case ">=": return v >= x; case "<=": return v <= x;
+          case "!=": return v !== x; default: return v === x;
+        }
+      };
     }
+    return { error: `Could not parse "${part}". Try  field op value  (e.g. za > 9).` };
   }
-  return { test: (r: IdxRow) => useOr ? conds.some(c => c(r)) : conds.every(c => c(r)), need: neededIndexCols(query) };
+
+  // Tokenize into ( ) and or, plus condition strings between them.
+  type Tok = { t: "(" | ")" | "and" | "or" } | { t: "cond"; v: string };
+  const toks: Tok[] = [];
+  const re = /(\()|(\))|\b(and)\b|\b(or)\b/g;
+  let last = 0, mm: RegExpExecArray | null;
+  while ((mm = re.exec(q)) !== null) {
+    const c = q.slice(last, mm.index).trim();
+    if (c) toks.push({ t: "cond", v: c });
+    toks.push({ t: (mm[1] ? "(" : mm[2] ? ")" : mm[3] ? "and" : "or") } as Tok);
+    last = re.lastIndex;
+  }
+  const tail = q.slice(last).trim();
+  if (tail) toks.push({ t: "cond", v: tail });
+
+  // Recursive descent:  or := and (or and)* ;  and := factor (and factor)* ;  factor := ( or ) | cond
+  let pos = 0, parseErr: string | null = null;
+  const peek = () => toks[pos];
+  function parseOr(): Pred | null {
+    const first = parseAnd(); if (!first) return null;
+    let node: Pred = first;
+    while (peek()?.t === "or") { pos++; const rhs = parseAnd(); if (!rhs) return null; const l: Pred = node; node = r => l(r) || rhs(r); }
+    return node;
+  }
+  function parseAnd(): Pred | null {
+    const first = parseFactor(); if (!first) return null;
+    let node: Pred = first;
+    while (peek()?.t === "and") { pos++; const rhs = parseFactor(); if (!rhs) return null; const l: Pred = node; node = r => l(r) && rhs(r); }
+    return node;
+  }
+  function parseFactor(): Pred | null {
+    const tk = peek();
+    if (!tk) { parseErr = "Unexpected end of query."; return null; }
+    if (tk.t === "(") {
+      pos++;
+      const inner = parseOr(); if (!inner) return null;
+      if (peek()?.t !== ")") { parseErr = "Missing ')'."; return null; }
+      pos++;
+      return inner;
+    }
+    if (tk.t === "cond") {
+      pos++;
+      const leaf = parseLeaf(tk.v);
+      if (typeof leaf !== "function") { parseErr = leaf.error; return null; }
+      return leaf;
+    }
+    parseErr = `Unexpected "${tk.t}".`;
+    return null;
+  }
+
+  const tree = parseOr();
+  if (!tree) return { error: parseErr ?? "Could not parse the query." };
+  if (pos !== toks.length) return { error: "Unbalanced parentheses in the query." };
+  return { test: tree, need: neededIndexCols(query) };
 }
 
 // Rasterize a live on-page <svg> (with CSS-variable colors resolved via getComputedStyle)
@@ -470,6 +551,7 @@ export default function SearchPage() {
           .filter(Boolean).filter(c => isKnownField(c) && !TABLE_FIXED_COLS.has(c));
         const cols = [...new Set([...queriedColumns(queryInput), ...viewCols])];
         const need = [...new Set([...pred.need, ...neededIndexCols(viewCols.join(" "))])];  // flux cols to attach
+        const needIp = [...new Set([...neededIntPz(queryInput), ...neededIntPz(viewCols.join(" "))])];  // int_pz cols to attach
         const getters = cols.map(c => colGetter(c));   // value-extractors for the dynamic table cols
         const CAP = TABLE_CAP;        // rows rendered in the table
         const DL_CAP = 100000;        // rows retained for the full-list download
@@ -480,6 +562,7 @@ export default function SearchPage() {
           const { idx } = await loadField(fc);
           // Only fetch the (larger) per-filter flux table when the query needs it.
           const fx = need.length ? await loadFilters(fc) : null;
+          const ip = needIp.length ? await loadIntPz(fc) : null;   // int_pz sidecar, only when queried
           // campfire spec-z sidecar (small, cached) — so czspec/czqual are queryable and
           // each row carries its campfire match for the results table.
           const sz = await loadSpecz(fc);
@@ -489,8 +572,9 @@ export default function SearchPage() {
               field: idx.field, za: idx.za[i], ra: idx.ra[i], dec: idx.dec[i],
               m277: idx.m277?.[i] ?? null, m444: idx.m444?.[i] ?? null,
               mabs: idx.mabs?.[i] ?? null, beta: idx.beta?.[i] ?? null,
+              m1500: idx.m1500?.[i] ?? null, m1300: idx.m1300?.[i] ?? null,
               zl68: idx.zl68?.[i] ?? null, zu68: idx.zu68?.[i] ?? null, z_lowz: idx.z_lowz?.[i] ?? null,
-              chia: idx.chia?.[i] ?? null, zspec: idx.zspec?.[i] ?? null,
+              chia: idx.chia?.[i] ?? null, chia_lowz: idx.chia_lowz?.[i] ?? null, zspec: idx.zspec?.[i] ?? null,
               czspec: cz?.z ?? null, czqual: cz?.q ?? null,
               rh_277: idx.rh_277?.[i] ?? null, rh_444: idx.rh_444?.[i] ?? null,
               kron_radius: idx.kron_radius?.[i] ?? null, a_image: idx.a_image?.[i] ?? null, b_image: idx.b_image?.[i] ?? null,
@@ -500,6 +584,7 @@ export default function SearchPage() {
               sample: idx.sample?.[i] ?? null,
             };
             if (fx) for (const c of need) r[c] = fx[c]?.[i] ?? null;   // native flux/fluxerr for this query
+            if (ip) for (const c of needIp) r[c] = ip[c]?.[i] ?? null;   // int_pz values for this query
             if (pred.test(r)) {
               total++;
               const id = idx.id[i];

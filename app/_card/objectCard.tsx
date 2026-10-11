@@ -194,7 +194,8 @@ export type FieldIndex = {
   id: number[]; ra: number[]; dec: number[]; za: (number | null)[];
   m277: NumCol; m444: NumCol; m1500?: NumCol; m1300?: NumCol; mabs?: NumCol; beta?: NumCol;
   selected: NumCol; inspected: NumCol; sample: NumCol;
-  zl68?: NumCol; zu68?: NumCol; z_lowz?: NumCol; chia?: NumCol; zspec?: NumCol;
+  zl68?: NumCol; zu68?: NumCol; z_lowz?: NumCol; chia?: NumCol; chia_lowz?: NumCol; zspec?: NumCol;
+  queryIntPz?: string[];
   rh_277?: NumCol; rh_444?: NumCol; kron_radius?: NumCol; a_image?: NumCol; b_image?: NumCol; theta?: NumCol;
   x?: NumCol; y?: NumCol; depthtier?: NumCol; detectcat?: (string | null)[] | null; tile?: (string | null)[] | null;
   detflag?: NumCol; pixflag?: NumCol; zflag?: NumCol; zsubBits?: NumCol; zsubCriteria?: string[] | null;
@@ -284,6 +285,35 @@ export async function loadFilters(fc: FieldConfig): Promise<Record<string, NumCo
     return fx;
   } catch {
     delete _filtersPromise[fc.field];  // allow retry on next search
+    return null;
+  }
+}
+
+// Per-field integrated-P(z) sidecar (<prefix>_intpz_v<ver>.json[.gz]): ~40 INT_* columns
+// (position-aligned to the index), lazy + cached, loaded only when an int_pz query runs.
+// Same path/override/fallback pattern as loadFilters.
+const _intpzCache: Record<string, Record<string, NumCol> | null> = {};
+const _intpzPromise: Record<string, Promise<Record<string, NumCol> | null>> = {};
+export async function loadIntPz(fc: FieldConfig): Promise<Record<string, NumCol> | null> {
+  if (fc.field in _intpzCache) return _intpzCache[fc.field];
+  if (fc.field in _intpzPromise) return _intpzPromise[fc.field];
+  _intpzPromise[fc.field] = (async () => {
+    const override = dataOverride();
+    const name = `${fc.prefix}_intpz_v${fc.version}.json`;
+    const primary = override ? webBase(override, fc.dir) : INDEX_BASE;
+    try {
+      return await fetchJsonMaybeGz(`${primary}/${name}`);
+    } catch (e) {
+      if (override) throw e;
+      return await fetchJsonMaybeGz(`${webBase(CORRAL_DEFAULT, fc.dir)}/${name}`);
+    }
+  })();
+  try {
+    const ip = await _intpzPromise[fc.field];
+    _intpzCache[fc.field] = ip;
+    return ip;
+  } catch {
+    delete _intpzPromise[fc.field];
     return null;
   }
 }
@@ -549,7 +579,9 @@ export function PZPlot({ zgrid, pz, za, zgridLowz, pzLowz }: {
 
   const lowzOk = !!(zgridLowz && pzLowz && pzLowz.length === zgridLowz.length && pzLowz.length);
   const pzMax = 1.1 * (Math.max(...pz) || 1);
-  const zmax = 16;
+  // Extend the x-axis for very-high-z objects so the P(z) peak isn't clamped off the right edge
+  // (e.g. z_a ~ 30). Round up to a multiple of 4 for clean ticks; default 16 for normal redshifts.
+  const zmax = (Number.isFinite(za) && za > 15) ? Math.ceil((za + 1) / 4) * 4 : 16;
   const cx = (z: number) => pad.l + (Math.min(z,zmax)/zmax)*pw;
   const cy = (p: number) => Math.max(pad.t, Math.min(pad.t + ph, pad.t + ph - (p/pzMax)*ph));
 
@@ -577,7 +609,7 @@ export function PZPlot({ zgrid, pz, za, zgridLowz, pzLowz }: {
           </g>
         );
       })}
-      {[0,4,8,12,16].map(v => (
+      {[0, zmax / 4, zmax / 2, (3 * zmax) / 4, zmax].map(v => (
         <g key={v}>
           <line x1={cx(v)} x2={cx(v)} y1={pad.t+ph} y2={pad.t+ph+5} stroke="var(--text-dim)" strokeWidth={0.8}/>
           <text x={cx(v)} y={pad.t+ph+18} textAnchor="middle" fontSize={11} fill="var(--text-muted)" fontFamily="monospace">{v}</text>

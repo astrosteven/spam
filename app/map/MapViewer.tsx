@@ -31,10 +31,13 @@ import {
 import {
   loadField,
   loadFilters,
+  loadSpecz,
+  loadIntPz,
   type FieldConfig,
   type FieldIndex,
   type NumCol,
 } from "@/app/_card/objectCard";
+import { makePredicate } from "@/app/search/page";   // reuse the Search query language on the map
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -86,10 +89,28 @@ export type MapFilters = {
   magMin: number | null;
   magMax: number | null;
   magFilter: string;
+  query: string;
 };
 export const DEFAULT_FILTERS: MapFilters = {
-  selectedOnly: false, zMin: null, zMax: null, magMin: null, magMax: null, magFilter: "F277W",
+  selectedOnly: false, zMin: null, zMax: null, magMin: null, magMax: null, magFilter: "F277W", query: "",
 };
+
+// One query-evaluable row from the base index at position i. Base built-ins come from the index;
+// per-band mag/snr/flux/colors, campfire czspec/czqual, and int_pz come from the lazy sidecars,
+// passed in `extra` (each a position-aligned column). Keys match the Search column names so
+// makePredicate/colGetter read them — so the map evaluates the SAME query language as Search.
+type QRow = Record<string, number | null>;
+function idxQueryRow(idx: FieldIndex, i: number, extra?: Record<string, NumCol>): QRow {
+  const g = (c: NumCol | undefined) => (c ? (c[i] ?? null) : null);
+  const row: QRow = {
+    za: g(idx.za), zspec: g(idx.zspec), m277: g(idx.m277), m444: g(idx.m444),
+    m1500: g(idx.m1500), m1300: g(idx.m1300), mabs: g(idx.mabs), beta: g(idx.beta),
+    chia: g(idx.chia), chia_lowz: g(idx.chia_lowz), z_lowz: g(idx.z_lowz), zl68: g(idx.zl68), zu68: g(idx.zu68),
+    selected: g(idx.selected), inspected: g(idx.inspected), sample: g(idx.sample),
+  };
+  if (extra) for (const k in extra) { const c = extra[k]; row[k] = c ? (c[i] ?? null) : null; }
+  return row;
+}
 
 // A source that passed the active filters, with the geometry needed to draw it.
 type Src = {
@@ -100,7 +121,7 @@ type Src = {
 };
 
 // Precompute the filtered source list (positions + ellipse params).
-function filterSources(idx: FieldIndex, magCol: NumCol, f: MapFilters): Src[] {
+function filterSources(idx: FieldIndex, magCol: NumCol, f: MapFilters, pred: ((r: QRow) => boolean) | null, qExtra?: Record<string, NumCol>): Src[] {
   const n = idx.n;
   const sel = idx.selected, za = idx.za;
   const a = idx.a_image, b = idx.b_image, kr = idx.kron_radius, theta = idx.theta ?? null;
@@ -121,6 +142,8 @@ function filterSources(idx: FieldIndex, magCol: NumCol, f: MapFilters): Src[] {
       if (mMin != null && m < mMin) continue;
       if (mMax != null && m > mMax) continue;
     }
+    // Free-form query (same language as Search) — applied last, after the cheap range filters.
+    if (pred && !pred(idxQueryRow(idx, i, qExtra))) continue;
     const xi = x![i], yi = y![i];
     if (xi == null || yi == null) continue;
     // Ellipse params (Kron): semi-axes a*kron, b*kron; PA theta deg CCW from +x.
@@ -144,6 +167,7 @@ export default function MapViewer({
   onSourceClick,
   onCount,
   onReadyHandle,
+  onQueryError,
 }: {
   field: FieldConfig;
   configUrl: string;
@@ -151,6 +175,7 @@ export default function MapViewer({
   onSourceClick: (id: number) => void;
   onCount?: (n: number) => void;
   onReadyHandle?: (h: FitsViewerHandle, idx: FieldIndex) => void;
+  onQueryError?: (e: string) => void;
 }) {
   const [state, setState] = useState<LoadState>("loading");
   const [config, setConfig] = useState<FitsglConfig | null>(null);
@@ -250,10 +275,55 @@ export default function MapViewer({
     return () => { cancelled = true; };
   }, [idx, magBand, magRangeActive]);
 
-  // Rebuild the filtered source list when index / mag column / filters change.
+  // Sidecar columns the free-form query needs beyond the base index (per-band flux for
+  // mag/snr/color, campfire czspec/czqual, int_pz). Loaded lazily when the query references
+  // them, attached position-aligned so the map evaluates the SAME query language as Search.
+  const [qExtra, setQExtra] = useState<Record<string, NumCol> | null>(null);
+  useEffect(() => {
+    const q = filters.query.toLowerCase();
+    if (!q.trim() || !idx) { setQExtra(null); return; }
+    let cancelled = false;
+    (async () => {
+      const needFilt = /\b(?:mag|snr|flux|fluxerr)_[a-z0-9]+\b/.test(q) || /\b[a-z][a-z0-9]*-[a-z][a-z0-9]*\b/.test(q);
+      const needSpecz = /\bcz(spec|qual)\b/.test(q);
+      const needIp = /\bint_(pz|zgt|cen)/.test(q);
+      const [fx, sz, ip] = await Promise.all([
+        needFilt ? loadFilters(field) : Promise.resolve(null),
+        needSpecz ? loadSpecz(field) : Promise.resolve(null),
+        needIp ? loadIntPz(field) : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+      const extra: Record<string, NumCol> = {};
+      if (fx) for (const k in fx) if (k.startsWith("flux_") || k.startsWith("fluxerr_")) extra[k] = fx[k];
+      if (ip) for (const k in ip) if (k.startsWith("int_")) extra[k] = ip[k];
+      if (sz && idx) {
+        const ids = idx.id ?? [];
+        const cz: (number | null)[] = new Array(ids.length).fill(null);
+        const cq: (number | null)[] = new Array(ids.length).fill(null);
+        for (let i = 0; i < ids.length; i++) { const r = sz[String(ids[i])]; if (r) { cz[i] = r.z; cq[i] = r.q; } }
+        extra["czspec"] = cz as NumCol; extra["czqual"] = cq as NumCol;
+      }
+      setQExtra(Object.keys(extra).length ? extra : null);
+    })();
+    return () => { cancelled = true; };
+  }, [filters.query, field, idx]);
+
+  // Compile the free-form query (same language as Search); blank = no-op. Error surfaced below.
+  const queryPred = useMemo(() => {
+    const q = filters.query.trim();
+    if (!q) return { test: null as ((r: QRow) => boolean) | null, error: "" };
+    const r = makePredicate(q);
+    return "error" in r
+      ? { test: null as ((r: QRow) => boolean) | null, error: r.error }
+      : { test: r.test as (r: QRow) => boolean, error: "" };
+  }, [filters.query]);
+
+  useEffect(() => { onQueryError?.(queryPred.error); }, [queryPred, onQueryError]);
+
+  // Rebuild the filtered source list when index / mag column / filters / query change.
   const sources = useMemo(
-    () => (idx ? filterSources(idx, magRangeActive ? magCol : null, filters) : []),
-    [idx, magCol, filters, magRangeActive],
+    () => (idx ? filterSources(idx, magRangeActive ? magCol : null, filters, queryPred.test, qExtra ?? undefined) : []),
+    [idx, magCol, filters, magRangeActive, queryPred, qExtra],
   );
   useEffect(() => {
     sourcesRef.current = sources;
