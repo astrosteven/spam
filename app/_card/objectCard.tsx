@@ -15,9 +15,23 @@ import dynamic from "next/dynamic";
 const FitsglCutout = dynamic(() => import("./FitsglCutout").then((m) => m.FitsglCutout), {
   ssr: false,
 });
+// Live grayscale multi-band montage rendered client-side from the PUBLIC fitsgl fpack tiles
+// (no Worker, no static stamp PNGs) — supersedes the pre-baked <StampMontage>.
+const LiveStampMontage = dynamic(
+  () => import("./LiveStampMontage").then((m) => m.LiveStampMontage),
+  { ssr: false },
+);
 // Fields that have live fitsgl tiles (drives whether the card shows the on-the-fly
 // cutout). Kept in sync with FITSGL_BASE in FitsglCutout.tsx. SPAM is CEERS-only.
 const FITSGL_FIELDS = new Set(["SPAM", "CEERS"]);
+
+// Bands shown in the grayscale cutout montage (CEERS/SPAM). Bands without fitsgl tiles are
+// skipped gracefully by fetchFitsglStamp, so a forward-looking superset is safe.
+export const CARD_STAMP_BANDS = [
+  "f435w", "f606w", "f814w",
+  "f070w", "f090w", "f115w", "f140m", "f150w", "f162m", "f182m", "f200w", "f210m",
+  "f250m", "f277w", "f300m", "f335m", "f356w", "f360m", "f410m", "f430m", "f444w", "f460m", "f470n", "f480m",
+];
 
 // Filter pivot wavelengths in microns. Covers HST/ACS + the full JWST/NIRCam
 // wide + medium band set used across UNICORN fields (incl. CEERS-SPAM medium bands).
@@ -58,6 +72,7 @@ export interface SourceResult {
   mabs?: number;
   beta?: number;
   aperflags?: number;
+  aperSNR?: Record<string, number>;   // per-band 0.2" native-aperture S/N (keyed by lowercase band)
   neighbor?: { dClosest?: number; magClosest?: number; dBrightest?: number; magBrightest?: number };
   stampUrl?: string;
   rgbUrl?: string;
@@ -470,7 +485,7 @@ export async function fetchObject(fc: FieldConfig, id: number, zg: ZGrid): Promi
       sedWave: zg.sedWave, sed: o.sed, sedLowz: o.sedLowz,
       selected: o.selected, inspected: o.inspected, sample: o.sample,
       interestLabel: o.interestLabel, zspec: o.zspec,
-      zaCirc: o.zaCirc, dchi2: o.dchi2, mabs: o.mabs, beta: o.beta, aperflags: o.aperflags, neighbor: o.neighbor,
+      zaCirc: o.zaCirc, dchi2: o.dchi2, mabs: o.mabs, beta: o.beta, aperflags: o.aperflags, aperSNR: o.aperSNR, neighbor: o.neighbor,
       stampUrl: `${webBase(corralBase(), fc.dir)}/stamps/${fc.prefix}_${id}.png`,
       rgbUrl: `${webBase(corralBase(), fc.dir)}/rgb/${fc.prefix}_${id}.png`,
       selFail,
@@ -836,7 +851,17 @@ export function ResultCard({ src }: { src: SourceResult }) {
           dec={Number(src.row["DEC"])}
         />
       )}
-      {src.stampUrl && <StampMontage url={src.stampUrl} />}
+      {/* Multi-band grayscale cutout montage — rendered live from the public fitsgl tiles
+          (no Worker, no static stamp PNGs). */}
+      {FITSGL_FIELDS.has(src.field?.toUpperCase?.() ?? "") && src.row["RA"] != null && src.row["DEC"] != null && (
+        <LiveStampMontage
+          field={src.field.toUpperCase()}
+          ra={Number(src.row["RA"])}
+          dec={Number(src.row["DEC"])}
+          bands={CARD_STAMP_BANDS}
+          aperSNR={src.aperSNR}
+        />
+      )}
 
       {/* Properties — slim multi-column strip */}
       <div style={{ marginTop: "1.25rem" }}>
