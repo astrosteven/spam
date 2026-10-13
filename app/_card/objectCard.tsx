@@ -59,6 +59,7 @@ export interface SourceResult {
   pzArr: number[];
   zgridLowz?: number[];
   pzArrLowz?: number[];
+  pzAlt?: Record<string, { i: number; p: number[] }>;   // sparse alt photo-z variants (eelg/circles/bbonly/wfc3/lrd)
   sedWave?: number[];
   sed?: number[];
   sedLowz?: number[];
@@ -481,7 +482,7 @@ export async function fetchObject(fc: FieldConfig, id: number, zg: ZGrid): Promi
     return {
       field: o.field, row: o.row, pz: o.pz, modelFluxes: o.modelFluxes,
       zgrid: zg.zgrid, pzArr: o.pzArr,
-      zgridLowz: zg.zgridLowz, pzArrLowz: o.pzArrLowz,
+      zgridLowz: zg.zgridLowz, pzArrLowz: o.pzArrLowz, pzAlt: o.pzAlt,
       sedWave: zg.sedWave, sed: o.sed, sedLowz: o.sedLowz,
       selected: o.selected, inspected: o.inspected, sample: o.sample,
       interestLabel: o.interestLabel, zspec: o.zspec,
@@ -650,10 +651,28 @@ function SEDLegend({ hasLowz }: { hasLowz: boolean }) {
   );
 }
 
-// P(z) plot — fiducial (solid) with the low-z (z<7) alternative overlaid (dashed red).
-export function PZPlot({ zgrid, pz, za, zgridLowz, pzLowz }: {
+// Alt photo-z variant display metadata (label + overplot colour), keyed by the pzAlt keys.
+export const PZ_ALT_META: Record<string, { label: string; color: string }> = {
+  eelg:    { label: "EELG",    color: "#2a9d8f" },
+  circles: { label: "Circles", color: "#c98a1e" },
+  bbonly:  { label: "BB-only", color: "#2F7DD1" },
+  wfc3:    { label: "+WFC3",   color: "#c2529a" },
+  lrd:     { label: "LRD",     color: "#d1685f" },
+};
+// Expand a sparse peak window { i, p } back into a dense array over the full z-grid (zeros outside).
+function densifyPz(sw: { i: number; p: number[] } | undefined, len: number): number[] | undefined {
+  if (!sw || !sw.p || !sw.p.length) return undefined;
+  const a = new Array(len).fill(0);
+  for (let k = 0; k < sw.p.length; k++) { const j = sw.i + k; if (j >= 0 && j < len) a[j] = sw.p[k]; }
+  return a;
+}
+
+// P(z) plot — fiducial (solid) with the low-z (z<7) alternative (dashed red) + optional
+// alternative photo-z variants (EELG/Circles/BB-only/+WFC3/LRD) overplotted via `alt`.
+export function PZPlot({ zgrid, pz, za, zgridLowz, pzLowz, alt }: {
   zgrid: number[]; pz: number[]; za: number;
   zgridLowz?: number[]; pzLowz?: number[];
+  alt?: { key: string; color: string; pz: number[] }[];
 }) {
   const w = 268, h = 300, pad = { t:20, r:14, b:44, l:40 };
   const pw = w - pad.l - pad.r;
@@ -661,7 +680,11 @@ export function PZPlot({ zgrid, pz, za, zgridLowz, pzLowz }: {
   if (!pz.length) return null;
 
   const lowzOk = !!(zgridLowz && pzLowz && pzLowz.length === zgridLowz.length && pzLowz.length);
-  const pzMax = 1.1 * (Math.max(...pz) || 1);
+  // y-axis top = 1.1x the tallest curve shown (fiducial or any enabled alt variant, so nothing clips).
+  const arrMax = (a: number[]) => a.reduce((m, v) => (v > m ? v : m), 0);
+  let peak = arrMax(pz);
+  for (const a of (alt ?? [])) if (a.pz.length === zgrid.length) peak = Math.max(peak, arrMax(a.pz));
+  const pzMax = 1.1 * (peak || 1);
   // Extend the x-axis for very-high-z objects so the P(z) peak isn't clamped off the right edge
   // (e.g. z_a ~ 30). Round up to a multiple of 4 for clean ticks; default 16 for normal redshifts.
   const zmax = (Number.isFinite(za) && za > 15) ? Math.ceil((za + 1) / 4) * 4 : 16;
@@ -676,6 +699,10 @@ export function PZPlot({ zgrid, pz, za, zgridLowz, pzLowz }: {
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ maxWidth: w, display: "block" }}>
       <polygon points={fill} fill="rgba(47,125,209,0.12)" />
       {lowzOk && <polyline points={lowzPts} fill="none" stroke={LOWZ_COLOR} strokeWidth={1.5} strokeDasharray="4,3"/>}
+      {(alt ?? []).filter(a => a.pz.length === zgrid.length).map(a => (
+        <polyline key={a.key} points={zgrid.map((z,i) => `${cx(z)},${cy(a.pz[i])}`).join(" ")}
+          fill="none" stroke={a.color} strokeWidth={1.4} opacity={0.9}/>
+      ))}
       <polyline points={pts} fill="none" stroke="#2F7DD1" strokeWidth={1.8}/>
       <line x1={cx(za)} x2={cx(za)} y1={pad.t} y2={pad.t+ph} stroke="var(--accent2)" strokeWidth={1.2} strokeDasharray="3,2"/>
       {(() => {
@@ -730,6 +757,17 @@ export function ResultCard({ src }: { src: SourceResult }) {
   };
   const pzNorm = normalize(src.pzArr, src.zgrid) ?? src.pzArr;
   const pzLowzNorm = normalize(src.pzArrLowz, src.zgridLowz);
+  // Alternative photo-z variants available for this object (LRD, EELG, …), toggled onto the P(z).
+  const altKeys = Object.keys(PZ_ALT_META).filter(k => src.pzAlt?.[k]);
+  const [altOn, setAltOn] = useState<Set<string>>(new Set());
+  const altCurves = altKeys
+    .filter(k => altOn.has(k))
+    .map(k => {
+      const norm = normalize(densifyPz(src.pzAlt![k], src.zgrid.length), src.zgrid);
+      return norm ? { key: k, color: PZ_ALT_META[k].color, pz: norm } : null;
+    })
+    .filter((a): a is { key: string; color: string; pz: number[] } => a != null);
+  const toggleAlt = (k: string) => setAltOn(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const chip = (color: string): CSSProperties => ({
     fontSize: "0.68rem", padding: "2px 9px", borderRadius: "999px",
@@ -838,7 +876,23 @@ export function ResultCard({ src }: { src: SourceResult }) {
         </div>
         <div style={{ flex: "1 1 220px", minWidth: 0 }}>
           <div className="mono" style={{ fontSize: "0.7rem", color: "var(--text-dim)", marginBottom: "4px" }}>P(z)</div>
-          <div data-plot="pz"><PZPlot zgrid={src.zgrid} pz={pzNorm} za={za} zgridLowz={src.zgridLowz} pzLowz={pzLowzNorm} /></div>
+          <div data-plot="pz"><PZPlot zgrid={src.zgrid} pz={pzNorm} za={za} zgridLowz={src.zgridLowz} pzLowz={pzLowzNorm} alt={altCurves} /></div>
+          {altKeys.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+              {altKeys.map(k => {
+                const on = altOn.has(k), meta = PZ_ALT_META[k];
+                return (
+                  <button key={k} onClick={() => toggleAlt(k)} className="mono"
+                    title={`Overplot the ${meta.label} photo-z variant`}
+                    style={{ fontSize: "0.66rem", padding: "2px 9px", borderRadius: "999px", cursor: "pointer",
+                      color: on ? "#fff" : meta.color, background: on ? meta.color : "transparent",
+                      border: `1px solid ${meta.color}${on ? "" : "66"}` }}>
+                    {meta.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
