@@ -392,10 +392,14 @@ function FilterSidebar({
       <div style={{ marginTop: "1.4rem", fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.9 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
           <span style={{ width: "11px", height: "11px", borderRadius: "50%", border: "2px solid #43d17a", display: "inline-block" }} />
-          selected
+          spec-z
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
           <span style={{ width: "11px", height: "11px", borderRadius: "50%", border: "2px solid #f2d43a", display: "inline-block" }} />
+          selected
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+          <span style={{ width: "11px", height: "11px", borderRadius: "50%", border: "2px solid #e8664d", display: "inline-block" }} />
           not selected
         </div>
         {shown != null && (

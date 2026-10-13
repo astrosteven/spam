@@ -41,9 +41,11 @@ import { makePredicate } from "@/app/search/page";   // reuse the Search query l
 
 type LoadState = "loading" | "ready" | "error";
 
-// Overlay colors: selected sources green, everything else yellow.
+// Overlay colors (3-way): GREEN = has a campfire spec-z, YELLOW = selected (no spec-z),
+// RED = not selected. Spec-z takes priority so confirmed sources stand out.
 const GREEN = "#43d17a";
 const YELLOW = "#f2d43a";
+const RED = "#e8664d";
 
 // Default trilogy scaling — the CAMPFIRE values (campfire.hollisakins.com) the map ships
 // with; the scaling panel starts here and "Reset to default" returns here. Same knobs
@@ -158,7 +160,7 @@ function filterSources(idx: FieldIndex, magCol: NumCol, f: MapFilters, pred: ((r
 }
 
 // One drawable glyph in SCREEN space.
-type Glyph = { id: number; sel: boolean; poly?: string; cx?: number; cy?: number; r?: number };
+type Glyph = { id: number; sel: boolean; sz?: boolean; poly?: string; cx?: number; cy?: number; r?: number };
 
 export default function MapViewer({
   field,
@@ -184,6 +186,8 @@ export default function MapViewer({
   const [magCol, setMagCol] = useState<NumCol>(null);
   const [glyphs, setGlyphs] = useState<Glyph[]>([]);
   const [showSources, setShowSources] = useState(true);   // hide to screenshot a clean colour image
+  // Ids with a campfire spec-z (→ drawn green). Loaded once per field; project() reads the ref.
+  const zspecIdsRef = useRef<Set<number> | null>(null);
   const [trilogy, setTrilogy] = useState<TrilogyParams>(CAMPFIRE_TRILOGY);
   const [panelOpen, setPanelOpen] = useState(true);
 
@@ -337,6 +341,21 @@ export default function MapViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sources]);
 
+  // Load the campfire spec-z ids once per field (→ green glyphs + the legend's spec-z row).
+  useEffect(() => {
+    let cancelled = false;
+    zspecIdsRef.current = null;
+    loadSpecz(field).then(map => {
+      if (cancelled) return;
+      const ids = new Set<number>();
+      for (const k in map) if (map[k]?.z != null) ids.add(Number(k));
+      zspecIdsRef.current = ids.size ? ids : null;
+      project();
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [field]);
+
   // Project the (culled) filtered sources to screen glyphs for the current frame.
   const project = useCallback(() => {
     const h = handleRef.current;
@@ -383,8 +402,9 @@ export default function MapViewer({
       if (!c) continue;
       const scx = c.x - rect.left, scy = c.y - rect.top;
 
+      const sz = zspecIdsRef.current?.has(s.id) ?? false;
       if (asDot || !(s.semiA > 0 && s.semiB > 0) || Number.isNaN(s.th)) {
-        out.push({ id: s.id, sel: s.sel, cx: scx, cy: scy, r: asDot ? 1.6 : 4 });
+        out.push({ id: s.id, sel: s.sel, sz, cx: scx, cy: scy, r: asDot ? 1.6 : 4 });
         continue;
       }
       const ct = Math.cos(s.th), st = Math.sin(s.th);
@@ -400,7 +420,7 @@ export default function MapViewer({
         pts.push(`${(p.x - rect.left).toFixed(1)},${(p.y - rect.top).toFixed(1)}`);
       }
       if (bad) continue;
-      out.push({ id: s.id, sel: s.sel, poly: pts.join(" ") });
+      out.push({ id: s.id, sel: s.sel, sz, poly: pts.join(" ") });
     }
     setGlyphs(out);
   }, []);
@@ -468,7 +488,7 @@ export default function MapViewer({
         style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}
       >
         {glyphs.map((g, k) => {
-          const color = g.sel ? GREEN : YELLOW;
+          const color = g.sz ? GREEN : g.sel ? YELLOW : RED;
           const onClick = (e: React.MouseEvent) => { e.stopPropagation(); clickRef.current(g.id); };
           if (g.poly) {
             return (
