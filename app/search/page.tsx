@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import Link from "next/link";
 import JSZip from "jszip";
+import ScatterPlot from "./ScatterPlot";  // interactive SVG scatter/histogram of the matched set (Plot view)
 import {
   FILTER_WAVES,
   SEARCH_FIELDS,
@@ -147,7 +148,7 @@ function fmtCell(v: number | string | null): string {
 // ---- Sortable results table -------------------------------------------------
 // One entry of the FULL retained match set (queryAllRef): field cfg + index row + campfire.
 // SPAM is single-field, so there is no sortable "field" column (see sortValueGetter).
-type MatchEntry = { fc: FieldConfig; id: number; r: IdxRow; cz: SpeczRec | null };
+export type MatchEntry = { fc: FieldConfig; id: number; r: IdxRow; cz: SpeczRec | null };
 type SortState = { col: string | null; dir: "asc" | "desc" };
 // Value-extractor for a sortable column, keyed by the header label / dynamic queryCol name.
 function sortValueGetter(col: string): (m: MatchEntry) => number | string | null {
@@ -365,6 +366,7 @@ export default function SearchPage() {
   const [viewColsInput, setViewColsInput] = useState("");   // extra columns to SHOW (not filter on)
   const [queryRows, setQueryRows] = useState<QueryRow[]>([]);
   const [queryCols, setQueryCols] = useState<string[]>([]);
+  const [resultView, setResultView] = useState<"table" | "plot">("table");   // results table vs. scatter/histogram
   const [sort, setSort] = useState<SortState>({ col: null, dir: "asc" });
   const [defsOpen, setDefsOpen] = useState(false);
   const [queryTotal, setQueryTotal] = useState(0);
@@ -1094,6 +1096,22 @@ export default function SearchPage() {
             </Link>
           </div>
 
+          {/* Table ⇄ Plot toggle */}
+          <div style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
+            {(["table", "plot"] as const).map(v => (
+              <button key={v} onClick={() => setResultView(v)} className="mono"
+                style={{ background: resultView === v ? "var(--accent-dim)" : "transparent",
+                  color: resultView === v ? "var(--accent)" : "var(--text-muted)",
+                  border: `1px solid ${resultView === v ? "var(--border-bright)" : "var(--border)"}`,
+                  borderRadius: "5px", padding: "6px 16px", fontSize: "0.75rem", cursor: "pointer", textTransform: "capitalize" }}>
+                {v}
+              </button>
+            ))}
+          </div>
+
+          {resultView === "plot" ? (
+            <ScatterPlot matches={queryAllRef.current} queryCols={queryCols} />
+          ) : (
           <div className="card" style={{ overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.8rem" }}>
               <thead>
@@ -1164,6 +1182,7 @@ export default function SearchPage() {
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
     </main>
