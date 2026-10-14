@@ -22,6 +22,7 @@ import {
 import {
   loadFitsglConfig,
   skyToPix,
+  pixToSky,
   DEFAULT_TRILOGY_PARAMS,
   type FitsglConfig,
   type ViewerConfig,
@@ -33,6 +34,7 @@ import {
   loadFilters,
   loadSpecz,
   loadIntPz,
+  angSep,
   type FieldConfig,
   type FieldIndex,
   type NumCol,
@@ -46,6 +48,21 @@ type LoadState = "loading" | "ready" | "error";
 const GREEN = "#43d17a";
 const YELLOW = "#f2d43a";
 const RED = "#e8664d";
+
+// ---- scale bar -------------------------------------------------------------
+const SCALEBAR_TARGET_PX = 90;   // aim for a bar ~this many CSS px wide
+const NICE_ARCSEC = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+function niceScaleBar(arcsecPerCssPx: number): { px: number; label: string } | null {
+  if (!(arcsecPerCssPx > 0) || !Number.isFinite(arcsecPerCssPx)) return null;
+  const target = SCALEBAR_TARGET_PX * arcsecPerCssPx;
+  let chosen = NICE_ARCSEC[0];
+  for (const a of NICE_ARCSEC) { if (a <= target) chosen = a; else break; }
+  const px = chosen / arcsecPerCssPx;
+  const label = chosen >= 60
+    ? `${(chosen / 60) % 1 === 0 ? (chosen / 60).toFixed(0) : (chosen / 60).toFixed(1)}′`
+    : `${chosen % 1 === 0 ? chosen.toFixed(0) : chosen.toFixed(1)}″`;
+  return { px, label };
+}
 
 // Default trilogy scaling — the CAMPFIRE values (campfire.hollisakins.com) the map ships
 // with; the scaling panel starts here and "Reset to default" returns here. Same knobs
@@ -186,6 +203,7 @@ export default function MapViewer({
   const [magCol, setMagCol] = useState<NumCol>(null);
   const [glyphs, setGlyphs] = useState<Glyph[]>([]);
   const [showSources, setShowSources] = useState(true);   // hide to screenshot a clean colour image
+  const [scaleBar, setScaleBar] = useState<{ px: number; label: string } | null>(null);
   // Ids with a campfire spec-z (→ drawn green). Loaded once per field; project() reads the ref.
   const zspecIdsRef = useRef<Set<number> | null>(null);
   const [trilogy, setTrilogy] = useState<TrilogyParams>(CAMPFIRE_TRILOGY);
@@ -423,6 +441,21 @@ export default function MapViewer({
       out.push({ id: s.id, sel: s.sel, sz, poly: pts.join(" ") });
     }
     setGlyphs(out);
+
+    // Scale bar: arcsec per CSS screen pixel at the current zoom, measured via the WCS over a
+    // 50-image-px baseline at the view centre (accurate for any zoom / mosaic rotation).
+    const wcs = h.getViewer()?.getWcs();
+    if (wcs) {
+      const a = h.imageToScreen(cam.centerX, cam.centerY);
+      const b = h.imageToScreen(cam.centerX + 50, cam.centerY);
+      const sa = pixToSky(wcs, cam.centerX, cam.centerY);
+      const sb = pixToSky(wcs, cam.centerX + 50, cam.centerY);
+      if (a && b && sa && sb && Number.isFinite(sa.ra) && Number.isFinite(sb.ra)) {
+        const dScreen = Math.hypot(b.x - a.x, b.y - a.y);
+        const dArcsec = angSep(sa.ra, sa.dec, sb.ra, sb.dec);
+        if (dScreen > 0 && dArcsec > 0) setScaleBar(niceScaleBar(dArcsec / dScreen));
+      }
+    }
   }, []);
 
   const pokeProject = useCallback(() => {
@@ -529,6 +562,17 @@ export default function MapViewer({
       >
         {showSources ? "◉ sources" : "○ sources"}
       </button>
+
+      {/* Scale bar — bottom-right. */}
+      {scaleBar && (
+        <div style={{ position: "absolute", right: 16, bottom: 16, zIndex: 16, textAlign: "center",
+          color: "var(--text)", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.68rem",
+          textShadow: "0 1px 3px rgba(255,255,255,0.9)" }}>
+          <div>{scaleBar.label}</div>
+          <div style={{ width: `${scaleBar.px}px`, height: 3, background: "var(--text)", margin: "2px auto 0",
+            borderLeft: "1px solid var(--text)", borderRight: "1px solid var(--text)" }} />
+        </div>
+      )}
 
       {/* SCALING panel — top-right. Drives the trilogy stretch live via applyScaling. */}
       <ScalingPanel
