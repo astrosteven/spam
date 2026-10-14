@@ -28,7 +28,16 @@ import {
   type ViewerConfig,
   type TrilogyParams,
   type TrilogyStats,
+  type StretchMode,
+  type ColormapName,
 } from "@fitsgl/core";
+import FitsglControls, {
+  RGB_WEIGHTED, RGB_SIMPLE, STACK_SW, STACK_LW,
+  isStackView, weightsEqual, stackWeights, SW_BANDS, LW_BANDS,
+  DEFAULT_STRETCH_MODE, TRILOGY_KNOBS,
+  applyFitsglDisplay, singleBandSource, simpleRgbSource, weightedSource,
+  type ViewSel, type ControlBand, type Weights,
+} from "@/app/_card/FitsglControls";
 import {
   loadField,
   loadFilters,
@@ -74,23 +83,6 @@ const CAMPFIRE_TRILOGY: TrilogyParams = {
   noisesig: 2.0,
   noisesig0: 2.0,
 };
-
-// The scaling knobs surfaced in the panel, with drag range + step.
-type Knob = {
-  key: keyof TrilogyParams;
-  label: string;
-  hint: string;
-  min: number;
-  max: number;
-  step: number;
-  log?: boolean; // slider position is log10-spaced across [min,max]
-};
-const SCALING_KNOBS: Knob[] = [
-  { key: "noiselum", label: "Noise floor", hint: "brightness of the sky/noise", min: 0, max: 0.4, step: 0.005 },
-  { key: "noisesig", label: "Contrast", hint: "noise anchor · mean + n·σ", min: 0.5, max: 4, step: 0.05 },
-  { key: "satpercent", label: "White point", hint: "% pixels saturated", min: 0.001, max: 1, step: 0.001, log: true },
-  { key: "noisesig0", label: "Black point", hint: "sky floor · mean − n·σ", min: 1, max: 3, step: 0.05 },
-];
 
 // Cap on drawn overlay glyphs per frame — the viewport cull keeps only what's visible,
 // and this bounds the SVG node count so pan/zoom stays smooth even zoomed all the way out.
@@ -218,7 +210,18 @@ export default function MapViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queuedIds]);
   const [trilogy, setTrilogy] = useState<TrilogyParams>(CAMPFIRE_TRILOGY);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);   // DISPLAY panel starts collapsed
+  // Display view mode: RGB-weighted composite (default) / simple 3-band RGB / SW-LW grayscale
+  // stack / a single band. Switching swaps the viewer's render source; single-band adds a
+  // colormap + a percentile black/white window (null = auto from the band's trilogy stats).
+  const [view, setView] = useState<ViewSel>(RGB_WEIGHTED);
+  const [colormap, setColormap] = useState<ColormapName>("gray");
+  const [percentile, setPercentile] = useState<{ lo: number; hi: number } | null>(null);
+  const [weights, setWeights] = useState<Weights>({ bands: [], map: {} });
+  const [stretchMode, setStretchMode] = useState<StretchMode>(DEFAULT_STRETCH_MODE);
+  // Band order currently loaded into the viewer's multiband source (last setSource) — lets a
+  // weight-only change take the fast setBandWeights path and keeps applyTrilogy's stats in order.
+  const appliedBandsRef = useRef<string[]>([]);
 
   const clickRef = useRef(onSourceClick);
   useEffect(() => { clickRef.current = onSourceClick; }, [onSourceClick]);
@@ -232,7 +235,16 @@ export default function MapViewer({
   const sourcesRef = useRef<Src[]>([]);
   const tiledRef = useRef(false);
   const resolvedRef = useRef(false);
-  const statsRef = useRef<{ stats: TrilogyStats[] | null; single: boolean }>({ stats: null, single: false });
+  // Latest panel state in refs so the stable display callbacks read them without re-subscribing.
+  const viewRef = useRef<ViewSel>(view); viewRef.current = view;
+  const colormapRef = useRef<ColormapName>(colormap); colormapRef.current = colormap;
+  const percentileRef = useRef<{ lo: number; hi: number } | null>(percentile); percentileRef.current = percentile;
+  const weightsRef = useRef<Weights>(weights); weightsRef.current = weights;
+  const trilogyRef = useRef<TrilogyParams>(trilogy); trilogyRef.current = trilogy;
+  const stretchRef = useRef<StretchMode>(stretchMode); stretchRef.current = stretchMode;
+  const bandStatsRef = useRef<Record<string, TrilogyStats | undefined>>({});
+  const rgbTripleRef = useRef<{ r: string; g: string; b: string } | null>(null);
+  const stacksRef = useRef<{ [STACK_SW]: Weights | null; [STACK_LW]: Weights | null }>({ [STACK_SW]: null, [STACK_LW]: null });
 
   // Load the tile config.
   useEffect(() => {
@@ -249,37 +261,124 @@ export default function MapViewer({
     return () => { cancelled = true; };
   }, [configUrl]);
 
-  const prep = useMemo<{ viewer: ViewerConfig; stats: TrilogyStats[] | null; single: boolean } | null>(() => {
+  const prep = useMemo<{
+    viewer: ViewerConfig;
+    bands: ControlBand[];
+    bandStats: Record<string, TrilogyStats | undefined>;
+    defaultWeights: Weights;
+    rgbTriple: { r: string; g: string; b: string };
+    swStack: Weights | null;
+    lwStack: Weights | null;
+  } | null>(() => {
     if (!config) return null;
     const bands = explorerBandsFromConfig(config);
     const st = defaultExplorerState(bands, defaultViewFromConfig(config));
     st.trilogyParams = { ...st.trilogyParams, ...CAMPFIRE_TRILOGY };
     const viewer = deriveViewerConfig(bands, st);
-    const v = viewer.view;
-    const names =
-      v.mode === "single" ? [v.band] : v.mode === "rgb" ? [v.r, v.g, v.b] : v.bands.map(b => b.band);
-    const raw = names.map(n => bands.find(b => b.name === n)?.trilogy);
-    const stats = raw.every(s => s !== undefined) ? (raw as TrilogyStats[]) : null;
-    return { viewer, stats, single: v.mode === "single" };
+    const bandStats: Record<string, TrilogyStats | undefined> = {};
+    for (const b of bands) bandStats[b.name] = b.trilogy;
+    const controlBands: ControlBand[] = bands.map(b => ({
+      name: b.name, label: b.label ?? b.name, trilogy: b.trilogy, wavelengthMicron: b.wavelengthMicron,
+    }));
+    const rgbTriple = { r: st.rgb.r, g: st.rgb.g, b: st.rgb.b };
+    const defaultWeights: Weights = st.weightBands.length
+      ? { bands: [...st.weightBands], map: { ...st.weights } }
+      : { bands: [rgbTriple.r, rgbTriple.g, rgbTriple.b], map: { [rgbTriple.r]: [1, 0, 0], [rgbTriple.g]: [0, 1, 0], [rgbTriple.b]: [0, 0, 1] } };
+    return { viewer, bands: controlBands, bandStats, defaultWeights, rgbTriple,
+      swStack: stackWeights(controlBands, SW_BANDS), lwStack: stackWeights(controlBands, LW_BANDS) };
   }, [config]);
   const viewerConfig = prep?.viewer ?? null;
+  const controlBands = prep?.bands ?? [];
+  // Default look = RGB-weighted + campfire trilogy + producer default weights (drives Reset state).
+  const isDefaultLook =
+    view === RGB_WEIGHTED && stretchMode === DEFAULT_STRETCH_MODE &&
+    TRILOGY_KNOBS.every(k => trilogy[k.key] === CAMPFIRE_TRILOGY[k.key]) &&
+    (prep ? weightsEqual(weights, prep.defaultWeights) : true);
   useEffect(() => {
-    statsRef.current = { stats: prep?.stats ?? null, single: prep?.single ?? false };
+    bandStatsRef.current = prep?.bandStats ?? {};
+    rgbTripleRef.current = prep?.rgbTriple ?? null;
+    stacksRef.current = { [STACK_SW]: prep?.swStack ?? null, [STACK_LW]: prep?.lwStack ?? null };
+  }, [prep]);
+  // Seed the weighted-composite weights from the producer default once prep loads → the map opens
+  // on the exact ship colour; also seed appliedBandsRef so applyScaling has the right stats order.
+  useEffect(() => {
+    if (!prep) return;
+    setWeights(prep.defaultWeights);
+    appliedBandsRef.current = [...prep.defaultWeights.bands];
   }, [prep]);
 
-  // Re-derive + apply the trilogy stretch on the LIVE viewer from the given params.
-  const applyScaling = useCallback((params: TrilogyParams) => {
-    const h = handleRef.current;
-    const viewer = h?.getViewer();
-    const { stats, single } = statsRef.current;
-    if (!viewer || !stats) return;
-    const expectedMode = single ? "single" : "multiband";
-    if (viewer.sourceMode !== expectedMode) return;
-    viewer.applyTrilogy(single ? stats[0] : stats, params);
-    viewer.setStretchMode("trilogy");
+  // Per-band trilogy stats in a given band order (for applyTrilogy). Missing stats ⇒ null.
+  const orderedStats = useCallback((names: string[]): TrilogyStats[] | null => {
+    const out: TrilogyStats[] = [];
+    for (const n of names) { const s = bandStatsRef.current[n]; if (!s) return null; out.push(s); }
+    return out.length ? out : null;
   }, []);
 
-  useEffect(() => { applyScaling(trilogy); }, [trilogy, applyScaling]);
+  // Re-derive + apply the display on the LIVE viewer for the current view + params via the shared
+  // applyFitsglDisplay helper (transfer curve / colormap / levels only — never camera or overlay).
+  const applyScaling = useCallback((params: TrilogyParams, mode: StretchMode, viewSel?: ViewSel) => {
+    const h = handleRef.current;
+    if (!h) return;
+    const v = viewSel ?? viewRef.current;
+    if (v === RGB_WEIGHTED || isStackView(v)) {
+      applyFitsglDisplay(h, { view: v, trilogy: params, stretchMode: mode, stats: orderedStats(appliedBandsRef.current) });
+    } else if (v === RGB_SIMPLE) {
+      const t = rgbTripleRef.current;
+      applyFitsglDisplay(h, { view: RGB_SIMPLE, trilogy: params, stretchMode: mode, stats: t ? orderedStats([t.r, t.g, t.b]) : null });
+    } else {
+      applyFitsglDisplay(h, { view: v, trilogy: params, stretchMode: mode, stats: bandStatsRef.current[v] ?? null, colormap: colormapRef.current, percentile: percentileRef.current });
+    }
+  }, [orderedStats]);
+
+  // Swap the viewer's render source when the view changes. setSource is a live in-memory swap
+  // (all bands loaded up front) and preserves the grid → overlays / pan / zoom stay registered.
+  const switchSource = useCallback((v: ViewSel) => {
+    const h = handleRef.current;
+    const viewer = h?.getViewer();
+    if (!h || !viewer) return;
+    try {
+      if (v === RGB_WEIGHTED || isStackView(v)) {
+        const w = v === RGB_WEIGHTED ? weightsRef.current : (v === STACK_SW ? stacksRef.current[STACK_SW] : stacksRef.current[STACK_LW]);
+        if (!w) return;
+        const applied: string[] = [];
+        const src = weightedSource(h, w, applied);
+        if (!src) return;
+        viewer.setSource(src); appliedBandsRef.current = applied;
+      } else if (v === RGB_SIMPLE) {
+        const t = rgbTripleRef.current;
+        const src = t && simpleRgbSource(h, t.r, t.g, t.b);
+        if (!src) return;
+        viewer.setSource(src); appliedBandsRef.current = t ? [t.r, t.g, t.b] : [];
+      } else {
+        const src = singleBandSource(h, v);
+        if (!src) return;
+        viewer.setSource(src); appliedBandsRef.current = [v];
+      }
+    } catch (err) { console.error("[map] setSource failed:", err); return; }
+    applyScaling(trilogyRef.current, stretchRef.current, v);
+  }, [applyScaling]);
+
+  // Apply a weights change to the LIVE weighted composite (fast setBandWeights when the band set
+  // is unchanged, else rebuild). Only runs in RGB-weighted mode.
+  const applyWeights = useCallback((w: Weights) => {
+    const h = handleRef.current;
+    const viewer = h?.getViewer();
+    if (!h || !viewer || viewRef.current !== RGB_WEIGHTED) return;
+    const applied = appliedBandsRef.current;
+    const sameSet = applied.length === w.bands.length && applied.every((b, i) => b === w.bands[i]);
+    if (sameSet && viewer.sourceMode === "multiband") {
+      try { viewer.setBandWeights(applied.map(b => w.map[b] ?? [0, 0, 0])); }
+      catch (err) { console.error("[map] setBandWeights failed:", err); }
+    } else {
+      switchSource(RGB_WEIGHTED);
+    }
+  }, [switchSource]);
+
+  // Apply live whenever params / mode / colormap / percentile change; swap source on view change;
+  // push weight edits to the live composite.
+  useEffect(() => { applyScaling(trilogy, stretchMode); }, [trilogy, stretchMode, colormap, percentile, applyScaling]);
+  useEffect(() => { switchSource(view); }, [view, switchSource]);
+  useEffect(() => { applyWeights(weights); }, [weights, applyWeights]);
 
   // Load our search index (positions, selected, za, geometry) once.
   useEffect(() => {
@@ -485,8 +584,11 @@ export default function MapViewer({
   const onReady = useCallback((h: FitsViewerHandle) => {
     handleRef.current = h;
     if (idx) readyHandleRef.current?.(h, idx);
+    // Sync the render source to the current view + re-apply the display (config renders the
+    // default; this makes the React panel state authoritative once the viewer is live).
+    switchSource(viewRef.current);
     pokeProject();
-  }, [idx, pokeProject]);
+  }, [idx, pokeProject, switchSource]);
 
   useEffect(() => {
     if (idx && handleRef.current) readyHandleRef.current?.(handleRef.current, idx);
@@ -588,100 +690,34 @@ export default function MapViewer({
         </div>
       )}
 
-      {/* SCALING panel — top-right. Drives the trilogy stretch live via applyScaling. */}
-      <ScalingPanel
-        params={trilogy}
-        open={panelOpen}
-        onToggle={() => setPanelOpen(o => !o)}
-        onChange={patch => setTrilogy(p => ({ ...p, ...patch }))}
-        onReset={() => setTrilogy(CAMPFIRE_TRILOGY)}
-      />
-    </div>
-  );
-}
-
-// ---- SCALING control panel -------------------------------------------------
-function ScalingPanel({
-  params, open, onToggle, onChange, onReset,
-}: {
-  params: TrilogyParams;
-  open: boolean;
-  onToggle: () => void;
-  onChange: (patch: Partial<TrilogyParams>) => void;
-  onReset: () => void;
-}) {
-  const isDefault = SCALING_KNOBS.every(k => params[k.key] === CAMPFIRE_TRILOGY[k.key]);
-  return (
-    <div
-      style={{
-        position: "absolute", top: 12, right: 12, zIndex: 15,
-        width: open ? 224 : undefined,
-        background: "rgba(20,22,26,0.82)", backdropFilter: "blur(6px)",
-        border: "1px solid rgba(255,255,255,0.18)", borderRadius: 8,
-        boxShadow: "0 6px 24px rgba(0,0,0,0.4)", overflow: "hidden",
-      }}
-    >
-      <button
-        onClick={onToggle}
-        className="mono"
-        aria-expanded={open}
-        style={{
-          display: "flex", alignItems: "center", gap: 8, width: "100%",
-          background: "none", border: "none", cursor: "pointer",
-          color: "#7fb4ec", fontSize: "0.72rem", letterSpacing: "0.08em",
-          padding: "9px 11px",
-        }}
-      >
-        <span style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s", display: "inline-block", fontSize: "0.7rem" }}>▸</span>
-        SCALING
-      </button>
-
-      {open && (
-        <div style={{ padding: "2px 12px 12px" }}>
-          {SCALING_KNOBS.map(k => {
-            const val = params[k.key];
-            const toPos = (v: number) =>
-              k.log ? ((Math.log10(v) - Math.log10(k.min)) / (Math.log10(k.max) - Math.log10(k.min))) * 1000 : v;
-            const fromPos = (p: number) =>
-              k.log ? Math.pow(10, Math.log10(k.min) + (p / 1000) * (Math.log10(k.max) - Math.log10(k.min))) : p;
-            return (
-              <div key={k.key} style={{ marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
-                  <span style={{ fontSize: "0.68rem", color: "#e8eaee", fontWeight: 600 }}>{k.label}</span>
-                  <span className="mono" style={{ fontSize: "0.68rem", color: "#7fb4ec" }}>
-                    {k.log ? val.toFixed(3) : val.toFixed(k.step < 0.01 ? 3 : 2)}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  aria-label={k.label}
-                  min={k.log ? 0 : k.min}
-                  max={k.log ? 1000 : k.max}
-                  step={k.log ? 1 : k.step}
-                  value={toPos(val)}
-                  onChange={e => onChange({ [k.key]: fromPos(Number(e.target.value)) } as Partial<TrilogyParams>)}
-                  style={{ width: "100%", accentColor: "#2F7DD1", cursor: "pointer", height: 4 }}
-                />
-                <div style={{ fontSize: "0.58rem", color: "#9aa0aa", marginTop: 1 }}>{k.hint}</div>
-              </div>
-            );
-          })}
-          <button
-            onClick={onReset}
-            disabled={isDefault}
-            className="mono"
-            style={{
-              width: "100%", marginTop: 2,
-              background: "none", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 5,
-              color: isDefault ? "#6b7078" : "#c9ccd2",
-              cursor: isDefault ? "default" : "pointer", opacity: isDefault ? 0.55 : 1,
-              fontSize: "0.68rem", padding: "6px 10px",
-            }}
-          >
-            Reset to default
-          </button>
-        </div>
-      )}
+      {/* DISPLAY panel — top-right. RGB-weighted / simple-RGB / SW-LW stacks / single-band +
+          colormap + percentile + per-band weights + stretch mode, applied live to the viewer. */}
+      <div style={{ position: "absolute", top: 12, right: 12, zIndex: 15 }}>
+        <FitsglControls
+          title="DISPLAY"
+          bands={controlBands}
+          view={view}
+          onViewChange={setView}
+          params={trilogy}
+          onParamsChange={patch => setTrilogy(p => ({ ...p, ...patch }))}
+          weights={weights}
+          onWeightsChange={setWeights}
+          mode={stretchMode}
+          onModeChange={setStretchMode}
+          colormap={colormap}
+          onColormapChange={setColormap}
+          percentile={percentile}
+          onPercentileChange={setPercentile}
+          isDefault={isDefaultLook}
+          onReset={() => {
+            setView(RGB_WEIGHTED); setTrilogy(CAMPFIRE_TRILOGY); setStretchMode(DEFAULT_STRETCH_MODE);
+            setColormap("gray"); setPercentile(null);
+            if (prep) setWeights(prep.defaultWeights);
+          }}
+          open={panelOpen}
+          onToggle={() => setPanelOpen(o => !o)}
+        />
+      </div>
     </div>
   );
 }
