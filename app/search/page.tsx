@@ -1080,12 +1080,18 @@ export default function SearchPage() {
             note={queryTotal > queryRows.length ? `full list — all ${queryTotal.toLocaleString()} matches (table shows first ${queryRows.length})` : undefined}
           />
 
-          <div style={{ margin: "-0.25rem 0 1rem" }}>
+          <div style={{ margin: "-0.25rem 0 1rem", display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <button onClick={downloadResultStamps} disabled={!!zipping} className="mono"
               title="Download a zip of result cards for these sources — cutout montage + SED + P(z) per object"
               style={{ background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(47,125,209,0.3)", borderRadius: "5px", padding: "7px 14px", fontSize: "0.75rem", cursor: zipping ? "wait" : "pointer" }}>
               {zipping ? `${zipping}…` : `↓ download result cards — stamp + SED + P(z) (${queryRows.length})`}
             </button>
+            <Link href="/map?queued=1" className="mono"
+              title="Show just these matched sources on the Explore map"
+              onClick={() => { try { window.localStorage.setItem("spamMapQueue", JSON.stringify(queryAllRef.current.map(m => m.id))); } catch { /* ignore */ } }}
+              style={{ background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(47,125,209,0.3)", borderRadius: "5px", padding: "7px 14px", fontSize: "0.75rem", textDecoration: "none" }}>
+              ◉ view {Math.min(queryTotal, queryAllRef.current.length || queryTotal).toLocaleString()} on map ↗
+            </Link>
           </div>
 
           <div className="card" style={{ overflow: "hidden" }}>

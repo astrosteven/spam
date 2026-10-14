@@ -187,6 +187,7 @@ export default function MapViewer({
   onCount,
   onReadyHandle,
   onQueryError,
+  queuedIds,
 }: {
   field: FieldConfig;
   configUrl: string;
@@ -195,6 +196,7 @@ export default function MapViewer({
   onCount?: (n: number) => void;
   onReadyHandle?: (h: FitsViewerHandle, idx: FieldIndex) => void;
   onQueryError?: (e: string) => void;
+  queuedIds?: Set<number> | null;   // handoff from Search: draw only these ids
 }) {
   const [state, setState] = useState<LoadState>("loading");
   const [config, setConfig] = useState<FitsglConfig | null>(null);
@@ -206,6 +208,15 @@ export default function MapViewer({
   const [scaleBar, setScaleBar] = useState<{ px: number; label: string } | null>(null);
   // Ids with a campfire spec-z (→ drawn green). Loaded once per field; project() reads the ref.
   const zspecIdsRef = useRef<Set<number> | null>(null);
+  const queuedIdsRef = useRef<Set<number> | null>(queuedIds ?? null);
+  useEffect(() => {
+    queuedIdsRef.current = queuedIds ?? null;
+    const n = sourcesRef.current.length;
+    const q = queuedIdsRef.current;
+    countRef.current?.(q ? sourcesRef.current.reduce((a, s) => a + (q.has(s.id) ? 1 : 0), 0) : n);
+    project();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedIds]);
   const [trilogy, setTrilogy] = useState<TrilogyParams>(CAMPFIRE_TRILOGY);
   const [panelOpen, setPanelOpen] = useState(true);
 
@@ -351,7 +362,8 @@ export default function MapViewer({
   useEffect(() => {
     sourcesRef.current = sources;
     resolvedRef.current = false;
-    countRef.current?.(sources.length);
+    const q = queuedIdsRef.current;
+    countRef.current?.(q ? sources.reduce((a, s) => a + (q.has(s.id) ? 1 : 0), 0) : sources.length);
     project();
     const t1 = setTimeout(() => project(), 200);
     const t2 = setTimeout(() => project(), 800);
@@ -405,9 +417,11 @@ export default function MapViewer({
     const halfH = (H / zoom) * 0.75 + 60;
     const x0 = cam.centerX - halfW, x1 = cam.centerX + halfW;
     const y0 = cam.centerY - halfH, y1 = cam.centerY + halfH;
+    const qids = queuedIdsRef.current;   // handoff: draw only these ids
     const visible: Src[] = [];
     for (let k = 0; k < list.length; k++) {
       const s = list[k];
+      if (qids && !qids.has(s.id)) continue;
       if (s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1) visible.push(s);
     }
 

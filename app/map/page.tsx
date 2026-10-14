@@ -60,6 +60,19 @@ function initialGotoId(): string | null {
   return typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null;
 }
 
+// Handoff from Search: /map?queued=1 reads the matched ids stashed in localStorage and shows ONLY
+// those on the map (with a "show all" escape). The Query page writes "spamMapQueue".
+function initialQueued(): Set<number> | null {
+  if (typeof window === "undefined") return null;
+  if (new URLSearchParams(window.location.search).get("queued") !== "1") return null;
+  try {
+    const raw = window.localStorage.getItem("spamMapQueue");
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr) && arr.length) return new Set(arr.map(Number).filter(Number.isFinite));
+  } catch { /* ignore */ }
+  return null;
+}
+
 type PanelState =
   | { kind: "hidden" }
   | { kind: "loading"; id: number }
@@ -75,6 +88,7 @@ export default function MapPage() {
   const [shown, setShown] = useState<number | null>(null);
   const [gotoMsg, setGotoMsg] = useState<string>("");
   const [queryError, setQueryError] = useState<string>("");
+  const [queuedIds, setQueuedIds] = useState<Set<number> | null>(initialQueued);
 
   const handleRef = useRef<FitsViewerHandle | null>(null);
   const idxRef = useRef<FieldIndex | null>(null);
@@ -163,6 +177,36 @@ export default function MapPage() {
     return () => clearTimeout(timer);
   }, [ready, handleGoto, openSource]);
 
+  // Handoff: once ready, frame the queued set (centroid + extent) so you land on the search results.
+  useEffect(() => {
+    if (!ready || !queuedIds || !queuedIds.size) return;
+    const idx = idxRef.current; if (!idx) return;
+    let sra = 0, sdec = 0, n = 0, raMin = Infinity, raMax = -Infinity, decMin = Infinity, decMax = -Infinity;
+    for (let i = 0; i < idx.id.length; i++) {
+      if (!queuedIds.has(idx.id[i])) continue;
+      const r = idx.ra[i], d = idx.dec[i];
+      if (!Number.isFinite(r) || !Number.isFinite(d)) continue;
+      sra += r; sdec += d; n++;
+      raMin = Math.min(raMin, r); raMax = Math.max(raMax, r); decMin = Math.min(decMin, d); decMax = Math.max(decMax, d);
+    }
+    if (!n) return;
+    const ra = sra / n, dec = sdec / n, cosd = Math.cos((dec * Math.PI) / 180) || 1;
+    const spanArcsec = Math.max((raMax - raMin) * cosd, decMax - decMin) * 3600;
+    const fov = Math.min(Math.max(spanArcsec * 1.3, 20), 3600);
+    let tries = 0; let timer: ReturnType<typeof setTimeout>;
+    const tick = () => { if (handleGoto(`${ra},${dec}`, fov)) return; if (++tries < 30) timer = setTimeout(tick, 200); };
+    timer = setTimeout(tick, 250);
+    return () => clearTimeout(timer);
+  }, [ready, queuedIds, handleGoto]);
+
+  const clearQueued = useCallback(() => {
+    setQueuedIds(null);
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href); u.searchParams.delete("queued");
+      window.history.replaceState({}, "", u.toString());
+    }
+  }, []);
+
   const panelOpen = panel.kind !== "hidden";
 
   return (
@@ -184,12 +228,25 @@ export default function MapPage() {
               </span>
             </div>
             <p style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-              Interactive NIRCam color map. Pan and zoom the mosaic; click a source (green = selected,
-              yellow = not) to open its SED and P(z). Filter at left; jump to a source at right.
+              Interactive NIRCam color map. Pan and zoom the mosaic; click a source (green = spec-z,
+              yellow = selected, red = not) to open its SED and P(z). Filter at left; jump to a source at right.
             </p>
           </div>
           <GotoBox onGo={handleGoto} msg={gotoMsg} />
         </div>
+        {queuedIds && (
+          <div className="mono" style={{
+            marginTop: "8px", display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap",
+            background: "var(--accent-dim)", border: "1px solid rgba(47,125,209,0.30)", borderRadius: "6px",
+            padding: "6px 12px", fontSize: "0.76rem", color: "var(--text)", width: "fit-content",
+          }}>
+            <span>Showing <b>{queuedIds.size.toLocaleString()}</b> source{queuedIds.size === 1 ? "" : "s"} from your search.</span>
+            <button onClick={clearQueued} className="mono" style={{
+              background: "#fff", border: "1px solid var(--border-bright)", borderRadius: "5px",
+              color: "var(--accent)", cursor: "pointer", fontSize: "0.72rem", padding: "3px 10px",
+            }}>show all</button>
+          </div>
+        )}
       </div>
 
       {/* Sidebar + viewer + card panel */}
@@ -205,6 +262,7 @@ export default function MapPage() {
             onCount={setShown}
             onReadyHandle={onReadyHandle}
             onQueryError={setQueryError}
+            queuedIds={queuedIds}
           />
         </div>
 
