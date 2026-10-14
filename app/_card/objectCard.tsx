@@ -458,6 +458,13 @@ async function fetchPackedCard(objBase: string, fc: FieldConfig, id: number, buc
   return JSON.parse(text);
 }
 
+// Warm the packed-card manifest cache in the background (call on map/field load). Corral has high
+// per-request latency, so fetching the tiny manifest ahead of time removes it from the critical
+// path of the first card click. Fire-and-forget; errors are swallowed (cardMeta caches null).
+export function prefetchCardMeta(fc: FieldConfig): void {
+  void cardMeta(webBase(corralBase(), fc.dir), fc);
+}
+
 export async function fetchObject(fc: FieldConfig, id: number, zg: ZGrid): Promise<SourceResult | null> {
   try {
     const objBase = webBase(corralBase(), fc.dir);

@@ -43,6 +43,7 @@ import {
   loadFilters,
   loadSpecz,
   loadIntPz,
+  prefetchCardMeta,
   angSep,
   type FieldConfig,
   type FieldIndex,
@@ -380,9 +381,11 @@ export default function MapViewer({
   useEffect(() => { switchSource(view); }, [view, switchSource]);
   useEffect(() => { applyWeights(weights); }, [weights, applyWeights]);
 
-  // Load our search index (positions, selected, za, geometry) once.
+  // Load our search index (positions, selected, za, geometry) once. Also warm the packed-card
+  // manifest in the background so the first card click doesn't pay Corral's manifest round-trip.
   useEffect(() => {
     let cancelled = false;
+    prefetchCardMeta(field);
     loadField(field)
       .then(({ idx }) => { if (!cancelled) { tiledRef.current = idx.tile != null; setIdx(idx); } })
       .catch(err => console.error("[map] failed to load search index:", err));
