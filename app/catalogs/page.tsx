@@ -1,7 +1,7 @@
 "use client";
 import { Fragment } from "react";
 
-const VERSION = "0.98";
+const VERSION = "0.99";
 const BASE_URL = "https://web.corral.tacc.utexas.edu/unicorn/spam";  // public Corral HTTPS root (catalog data)
 
 // Photo-z variants. The FITS filename is identical in every variant dir
@@ -32,7 +32,7 @@ const FIELDS: Field[] = [
   { id: "spam", name: "SPAM", dir: "", prefix: "ceers", available: true, variants: ALL_PZ, programs: ["CEERS", "SPAM", "MINERVA", "CAPERS"] },
 ];
 
-// Real file sizes for the live v0.98 release, keyed by row key.
+// Real file sizes for the live v0.99 release, keyed by row key.
 const CEERS_SIZES: Record<string, string> = {
   readme: "24 KB",
   photom: "2.4 GB",

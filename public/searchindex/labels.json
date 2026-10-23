@@ -18,7 +18,7 @@
 "ref": "Finkelstein+2023; Arrabal Haro+2023",
 "note": "One of the first z>11 galaxies spectroscopically confirmed by JWST; named after Finkelstein's daughter.",
 "za": 11.84,
-"m444": 27.886,
+"m444": 27.885,
 "zspec": 11.41,
 "selected": 1
 },
@@ -56,7 +56,7 @@
 "ref": "Larson+2023 (CEERS)",
 "note": "Hosted the most distant confirmed accreting SMBH at the time (z=8.68, 570 Myr after Big Bang); originally EGSY8p7.",
 "za": 8.84,
-"m444": 23.847,
+"m444": 23.848,
 "zspec": 8.6765,
 "selected": 1
 },
@@ -75,7 +75,7 @@
 "ref": "Costantin+2023 (Nature)",
 "note": "Most distant barred spiral galaxy found; a young Milky-Way analog / progenitor at z=3.",
 "za": 3.06,
-"m444": 24.503,
+"m444": 24.504,
 "selected": 1
 }
 ]

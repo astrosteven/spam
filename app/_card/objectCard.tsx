@@ -151,7 +151,7 @@ export function RgbStamp({ url }: { url: string }) {
 }
 
 // ---- data wiring -----------------------------------------------------------
-export const VERSION = "0.98";
+export const VERSION = "0.99";
 export const CORRAL_DEFAULT = "https://web.corral.tacc.utexas.edu/unicorn/spam";
 // The search index + zgrid are served from the site itself (GitHub Pages / Fastly
 // CDN) — fast + edge-cached for everyone — while the per-object files stay on Corral.

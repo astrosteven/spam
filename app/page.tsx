@@ -1,12 +1,12 @@
 "use client";
 import Link from "next/link";
 
-const VERSION = "0.98";
+const VERSION = "0.99";
 
 const FILTER_GROUPS = [
-  { instr: "NIRCam", filters: ["F070W","F090W","F115W","F140M","F150W","F162M","F182M","F200W","F210M","F250M","F277W","F300M","F335M","F356W","F360M","F410M","F430M","F444W","F460M","F480M"] },
+  { instr: "NIRCam", filters: ["F070W","F090W","F115W","F140M","F150W","F162M","F182M","F200W","F210M","F250M","F277W","F300M","F335M","F356W","F360M","F410M","F430M","F444W","F460M","F470N","F480M"] },
   { instr: "ACS",    filters: ["F435W","F606W","F814W"] },
-  { instr: "WFC3",   filters: ["F105W","F125W","F140W","F160W"] },
+  { instr: "WFC3",   filters: ["F098M","F105W","F125W","F140W","F160W"] },
 ];
 const N_FILTERS = FILTER_GROUPS.reduce((n, g) => n + g.filters.length, 0);
 // JWST program IDs -> STScI program-info lookup pages.
@@ -23,7 +23,7 @@ const FIELD_META = [
   { label: "RA, Dec", value: "214.825°, 52.825°" },
   { label: "Area", value: "~100 arcmin²" },
   { label: "Imaging", value: "JWST NIRCam + HST ACS / WFC3" },
-  { label: "Sources", value: "174,454" },
+  { label: "Sources", value: "174,525" },
 ];
 
 const CARDS = [
@@ -53,7 +53,7 @@ export default function DataOverview() {
         <div style={{ display: "flex", alignItems: "baseline", gap: "12px", flexWrap: "wrap" }}>
           <span className="display" style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--navy)" }}>SPAM</span>
           <span className="mono" style={{ fontSize: "0.72rem", padding: "3px 10px", borderRadius: "999px", background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(47,125,209,0.25)" }}>v{VERSION}</span>
-          <span style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>174,454 sources · {N_FILTERS} filters</span>
+          <span style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>174,525 sources · {N_FILTERS} filters</span>
         </div>
       </div>
 
