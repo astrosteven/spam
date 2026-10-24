@@ -34,21 +34,21 @@ const FIELDS: Field[] = [
 
 // Real file sizes for the live v0.99 release, keyed by row key.
 const CEERS_SIZES: Record<string, string> = {
-  readme: "24 KB",
-  photom: "2.4 GB",
-  selected: "4.7 MB",
-  detflags: "5.3 MB",
-  selflags: "21 MB",
-  segmap: "13 MB",
+  readme: "25 KB",
+  photom: "2.7 GB",
+  selected: "5.0 MB",
+  detflags: "6.0 MB",
+  selflags: "22 MB",
+  segmap: "14 MB",
   psfs: "2.0 MB",
-  depths: "4 KB",
-  area: "4 KB",
-  completeness: "32 KB",
-  pz_fiducial: "2.6 GB",
-  pz_eelg: "2.6 GB",
-  pz_circles: "2.6 GB",
-  pz_bbonly: "2.6 GB",
-  pz_wfc3: "2.6 GB",
+  depths: "1 KB",
+  area: "1 KB",
+  completeness: "35 KB",
+  pz_fiducial: "2.8 GB",
+  pz_eelg: "2.8 GB",
+  pz_circles: "2.8 GB",
+  pz_bbonly: "2.8 GB",
+  pz_wfc3: "2.8 GB",
 };
 
 // Project-wide files. Templates currently live inside the CEERS-SPAM directory on
